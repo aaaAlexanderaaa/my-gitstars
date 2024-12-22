@@ -22,6 +22,9 @@ WORKDIR /app/backend
 
 COPY backend/wait-db.js .
 
+# Install backend dependencies again to ensure they're available
+RUN npm install
+
 EXPOSE 4000
 
 CMD ["sh", "-c", "node wait-db.js && npx sequelize-cli db:migrate && npx nodemon src/index.js"] 
