@@ -263,6 +263,7 @@ function RepoList({
           >
             <div className="repo-item-content">
               <div className="repo-header">
+                <div className="repo-title">
                 <a 
                   href={`https://github.com/${repo.owner}/${repo.name}`}
                   target="_blank"
@@ -272,13 +273,18 @@ function RepoList({
                 >
                   {repo.owner}/{repo.name}
                 </a>
+                </div>
+                <Typography variant="caption" className="starred-date">
+                  {formatDate(repo.starredAt)}
+                </Typography>
+              </div>
+              <div>
                 {repo.description && (
                   <Typography variant="body2" className="repo-description">
                     {repo.description}
                   </Typography>
                 )}
-              </div>
-              
+                </div>
               <div className="tags-container">
                 {repo.topics?.map(topic => (
                   <Chip
