@@ -2,9 +2,6 @@
 
 A web application that helps you manage your GitHub starred repositories with custom tags and better organization.
 
-![GitHub Stars Manager](frontend/public/favicon.svg)
-
-
 
 ## Features
 

@@ -1,4 +1,4 @@
-import { Sequelize } from 'sequelize';
+const { Sequelize } = require('sequelize');
 
 async function waitForDb() {
   const sequelize = new Sequelize(

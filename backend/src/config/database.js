@@ -1,6 +1,6 @@
-import 'dotenv/config';
+require('dotenv').config();
 
-export default {
+module.exports = {
   development: {
     username: process.env.POSTGRES_USER || 'postgres',
     password: process.env.POSTGRES_PASSWORD || 'postgres',
