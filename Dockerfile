@@ -7,9 +7,9 @@ COPY frontend/package*.json frontend/
 COPY backend/package*.json backend/
 
 # Install dependencies
-RUN npm install -g react-scripts
+RUN npm install -g react-scripts && npm install --save sequelize
+RUN cd backend && npm install
 RUN cd frontend && npm install --legacy-peer-deps
-RUN cd backend && npm install --legacy-peer-deps
 
 # Copy source code
 COPY frontend/ frontend/
@@ -19,9 +19,6 @@ COPY backend/ backend/
 RUN cd frontend && npm run build
 
 WORKDIR /app/backend
-
-# Install backend dependencies in the correct directory
-RUN npm install
 
 COPY backend/wait-for-db.sh .
 RUN chmod +x /app/backend/wait-for-db.sh
