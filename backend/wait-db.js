@@ -1,4 +1,5 @@
-const { Sequelize } = require('sequelize');
+import 'dotenv/config';
+import { Sequelize } from 'sequelize';
 
 async function waitForDb() {
   const sequelize = new Sequelize(
