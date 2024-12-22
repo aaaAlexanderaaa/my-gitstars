@@ -279,10 +279,29 @@
   text-decoration: none;
   font-weight: 600;
   font-size: 16px;
+  position: relative;
+}
+
+.repo-title-link::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  transform: scaleX(0);
+  height: 2px;
+  bottom: 0;
+  left: 0;
+  background-color: #007BFF;
+  transform-origin: bottom right;
+  transition: transform 0.25s ease-out;
+}
+
+.repo-title-link:hover::after {
+  transform: scaleX(1);
+  transform-origin: bottom left;
 }
 
 .repo-title-link:hover {
-  text-decoration: underline;
+  color: #0056b3 !important;
 }
 
 /* Ensure the link doesn't inherit the list item's hover state */

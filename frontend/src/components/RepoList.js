@@ -270,7 +270,7 @@ function RepoList({
                   onClick={(e) => e.stopPropagation()}
                   className="repo-title-link"
                 >
-                  {repo.name}
+                  {repo.owner}/{repo.name}
                 </a>
                 {repo.description && (
                   <Typography variant="body2" className="repo-description">
