@@ -4,6 +4,7 @@
     "migrate": "sequelize-cli db:migrate",
     "migrate:undo": "sequelize-cli db:migrate:undo"
   },
+  "type": "module",
   "dependencies": {
     "@octokit/rest": "^19.0.13",
     "cors": "^2.8.5",
