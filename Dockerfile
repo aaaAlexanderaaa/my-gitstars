@@ -7,7 +7,7 @@ COPY frontend/package*.json frontend/
 COPY backend/package*.json backend/
 
 # Install dependencies
-RUN npm install -g react-scripts sequelize-cli
+RUN npm install -g react-scripts
 RUN cd frontend && npm install --legacy-peer-deps
 RUN cd backend && npm install --legacy-peer-deps
 
@@ -25,4 +25,4 @@ RUN chmod +x /app/backend/wait-for-db.sh
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "./wait-for-db.sh db && sequelize-cli db:migrate && npx nodemon src/index.js"] 
+CMD ["sh", "-c", "./wait-for-db.sh db && npx sequelize-cli db:migrate && npx nodemon src/index.js"] 
