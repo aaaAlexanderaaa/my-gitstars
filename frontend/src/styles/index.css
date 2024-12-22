@@ -1,0 +1,46 @@
+:root {
+  /* Custom Tags */
+  --custom-tags-bg: var(--theme-customTags-background);
+  --custom-tags-text: var(--theme-customTags-text);
+  --custom-tags-border: var(--theme-customTags-border);
+  --custom-tags-chip-bg: var(--theme-customTags-chip-background);
+  --custom-tags-chip-shadow: var(--theme-customTags-chip-shadow);
+  --custom-tags-chip-hover-bg: var(--theme-customTags-chip-hoverBackground);
+  --custom-tags-chip-radius: var(--theme-customTags-chip-radius);
+
+  /* Languages */
+  --languages-bg: var(--theme-languages-background);
+  --languages-text: var(--theme-languages-text);
+  --languages-border: var(--theme-languages-border);
+  --languages-chip-bg: var(--theme-languages-chip-background);
+  --languages-chip-shadow: var(--theme-languages-chip-shadow);
+  --languages-chip-hover-bg: var(--theme-languages-chip-hoverBackground);
+  --languages-chip-radius: var(--theme-languages-chip-radius);
+
+  /* Topics */
+  --topics-bg: var(--theme-topics-background);
+  --topics-text: var(--theme-topics-text);
+  --topics-border: var(--theme-topics-border);
+  --topics-chip-bg: var(--theme-topics-chip-background);
+  --topics-chip-shadow: var(--theme-topics-chip-shadow);
+  --topics-chip-hover-bg: var(--theme-topics-chip-hoverBackground);
+  --topics-chip-radius: var(--theme-topics-chip-radius);
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f6f8fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+} 
