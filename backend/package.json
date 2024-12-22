@@ -1,7 +1,7 @@
 {
   "scripts": {
     "dev": "nodemon src/index.js",
-    "migrate": "sequelize-cli db:migrate",
+    "migrate": "sequelize-cli --config src/config/database.js db:migrate",
     "migrate:undo": "sequelize-cli db:migrate:undo"
   },
   "type": "module",
