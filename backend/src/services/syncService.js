@@ -4,6 +4,7 @@ const GitHubService = require('./githubService');
 
 class SyncService {
   static async syncUserStars(userId) {
+    console.log('Syncing user stars for user:', userId);
     const user = await User.findByPk(userId);
     if (!user) {
       throw new Error('User not found');

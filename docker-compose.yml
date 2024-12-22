@@ -8,9 +8,9 @@ services:
     ports:
       - "4000:4000"
     volumes:
-      - ./frontend:/app/frontend
-      - ./backend:/app/backend
-      - /app/node_modules
+      - ./frontend/src:/app/frontend/src
+      - ./backend/src:/app/backend/src
+      - frontend-build:/app/frontend/build
     command: >
       sh -c "node wait-db.js &&
              npx sequelize-cli db:migrate &&
@@ -46,3 +46,4 @@ services:
 
 volumes:
   postgres_data:
+  frontend-build:

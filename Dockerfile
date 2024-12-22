@@ -1,26 +1,35 @@
-FROM node:20-alpine
+# Build stage for frontend
+FROM node:20-alpine as frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install --legacy-peer-deps
+COPY frontend/ ./
+RUN npm run build
 
+# Build stage for backend
+FROM node:20-alpine as backend-builder
+WORKDIR /app/backend
+COPY backend/package*.json ./
+RUN npm install --legacy-peer-deps --production
+COPY backend/ ./
+
+# Final stage
+FROM node:20-alpine
 WORKDIR /app
 
-# Copy package files first for better caching
-COPY frontend/package*.json frontend/
-COPY backend/package*.json backend/
+# Install only the necessary global packages
+RUN npm install -g sequelize-cli
 
-# Install dependencies
-RUN npm install -g react-scripts
-RUN cd frontend && npm install --legacy-peer-deps
-RUN cd backend && npm install --legacy-peer-deps
-
-# Copy source code
-COPY frontend/ frontend/
-COPY backend/ backend/
-
-# Build frontend
-RUN cd frontend && npm run build
+# Copy built frontend and backend
+COPY --from=frontend-builder /app/frontend/build /app/frontend/build
+COPY --from=backend-builder /app/backend /app/backend
+# Copy node_modules from backend builder
+COPY --from=backend-builder /app/backend/node_modules /app/backend/node_modules
 
 WORKDIR /app/backend
 
-COPY backend/wait-db.js .
+# Install only dev dependencies needed for running the server
+RUN npm install nodemon --save-dev
 
 EXPOSE 4000
 

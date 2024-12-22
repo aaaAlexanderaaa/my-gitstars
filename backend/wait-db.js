@@ -1,40 +1,28 @@
 const { Sequelize } = require('sequelize');
+const config = require('./src/config/database');
 
-async function waitForDb() {
-  const sequelize = new Sequelize(
-    process.env.POSTGRES_DB,
-    process.env.POSTGRES_USER,
-    process.env.POSTGRES_PASSWORD,
-    {
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT,
-      dialect: 'postgres',
-      logging: false,
-      retry: {
-        max: 10,
-        timeout: 3000
-      }
-    }
-  );
+const env = process.env.NODE_ENV || 'development';
+const dbConfig = config[env];
 
-  let retries = 5;
-  while (retries) {
+const sequelize = new Sequelize(dbConfig);
+
+async function waitForDb(retries = 5, delay = 5000) {
+  while (retries > 0) {
     try {
       await sequelize.authenticate();
-      console.log('Database connection established');
+      console.log('Database connection established successfully.');
       return true;
-    } catch (err) {
-      console.log('Waiting for database...', retries, 'retries left');
-      retries -= 1;
-      await new Promise(resolve => setTimeout(resolve, 5000));
+    } catch (error) {
+      console.log(`Unable to connect to the database. Retries left: ${retries}`);
+      retries--;
+      if (retries === 0) {
+        console.error('Max retries reached. Exiting...');
+        process.exit(1);
+      }
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
-  throw new Error('Unable to connect to database');
+  return false;
 }
 
-waitForDb()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error('Database connection failed:', err);
-    process.exit(1);
-  }); 
+waitForDb(); 

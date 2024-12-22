@@ -6,6 +6,7 @@
   },
   "dependencies": {
     "@octokit/rest": "^19.0.13",
+    "axios": "^1.6.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.18.2",
@@ -17,10 +18,10 @@
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.37.1",
     "http-proxy-middleware": "^2.0.6",
-    "cookie-parser": "^1.4.6"
+    "cookie-parser": "^1.4.6",
+    "sequelize-cli": "^6.6.2"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22",
-    "sequelize-cli": "^6.6.2"
+    "nodemon": "^2.0.22"
   }
 }
