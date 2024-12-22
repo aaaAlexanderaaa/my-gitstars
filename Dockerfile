@@ -20,6 +20,9 @@ RUN cd frontend && npm run build
 
 WORKDIR /app/backend
 
+# Install backend dependencies in the correct directory
+RUN npm install
+
 COPY backend/wait-for-db.sh .
 RUN chmod +x /app/backend/wait-for-db.sh
 
