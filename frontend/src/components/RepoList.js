@@ -134,11 +134,13 @@ function RepoList({
       }
     });
 
-  const handleRepoClick = (repo) => {
-    // Don't trigger preview if it's already selected
-    if (selectedRepo?.id !== repo.id) {
-      onRepoSelect(repo);
+  const handleItemClick = (repo, event) => {
+    // Don't trigger repo selection if clicking on a link or tag
+    if (event.target.tagName.toLowerCase() === 'a' || 
+        event.target.closest('.MuiChip-root')) {
+      return;
     }
+    onRepoSelect(repo);
   };
 
   return (
@@ -255,27 +257,26 @@ function RepoList({
       <List className="repo-list-items">
         {filteredAndSortedRepos.map(repo => (
           <ListItem
-            button
             key={repo.id}
-            selected={selectedRepo?.id === repo.id}
-            onClick={() => handleRepoClick(repo)}
-            className="repo-item"
+            onClick={(e) => handleItemClick(repo, e)}
+            className={`repo-item ${selectedRepo?.id === repo.id ? 'selected' : ''}`}
           >
             <div className="repo-item-content">
               <div className="repo-header">
-                <div className="repo-title">
-                  <Typography variant="body1" className="repo-name">
-                    {repo.owner}/{repo.name}
+                <a 
+                  href={`https://github.com/${repo.owner}/${repo.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="repo-title-link"
+                >
+                  {repo.name}
+                </a>
+                {repo.description && (
+                  <Typography variant="body2" className="repo-description">
+                    {repo.description}
                   </Typography>
-                  {repo.description && (
-                    <Typography variant="body2" className="repo-description">
-                      {repo.description}
-                    </Typography>
-                  )}
-                </div>
-                <Typography variant="caption" className="starred-date">
-                  {formatDate(repo.starredAt)}
-                </Typography>
+                )}
               </div>
               
               <div className="tags-container">

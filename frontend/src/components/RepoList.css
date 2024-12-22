@@ -273,3 +273,19 @@
 .tag-input-section {
   width: 100%;
 }
+
+.repo-title-link {
+  color: #0366d6;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.repo-title-link:hover {
+  text-decoration: underline;
+}
+
+/* Ensure the link doesn't inherit the list item's hover state */
+.repo-item:hover .repo-title-link {
+  color: #0366d6;
+}
