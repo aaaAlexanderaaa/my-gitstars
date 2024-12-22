@@ -21,7 +21,7 @@ RUN cd frontend && npm run build
 WORKDIR /app/backend
 
 COPY backend/wait-for-db.sh .
-RUN chmod +x wait-for-db.sh
+RUN chmod +x /app/backend/wait-for-db.sh
 
 EXPOSE 4000
 
