@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { Sequelize } from 'sequelize';
 
 async function waitForDb() {
