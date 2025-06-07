@@ -1,8 +1,14 @@
 {
+  "name": "github-stars-backend",
+  "version": "1.0.0",
+  "description": "Backend API for GitHub Stars Manager",
+  "main": "src/index.js",
   "scripts": {
+    "start": "nodemon src/index.js",
     "dev": "nodemon src/index.js",
     "migrate": "sequelize-cli db:migrate",
-    "migrate:undo": "sequelize-cli db:migrate:undo"
+    "migrate:undo": "sequelize-cli db:migrate:undo",
+    "migrate:status": "sequelize-cli db:migrate:status"
   },
   "dependencies": {
     "@octokit/rest": "^19.0.13",

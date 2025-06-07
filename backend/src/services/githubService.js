@@ -60,6 +60,58 @@ class GitHubService {
     const { data } = await this.octokit.users.getAuthenticated();
     return data;
   }
+
+  async getRepositoryReleases(owner, repo, perPage = 30) {
+    try {
+      const { data } = await this.octokit.repos.listReleases({
+        owner,
+        repo,
+        per_page: perPage,
+        page: 1
+      });
+
+      return data.map(release => ({
+        githubReleaseId: release.id.toString(),
+        tagName: release.tag_name,
+        name: release.name,
+        body: release.body,
+        publishedAt: release.published_at ? new Date(release.published_at) : null,
+        isPrerelease: release.prerelease,
+        isDraft: release.draft
+      }));
+    } catch (error) {
+      // If repo has no releases or releases are not accessible, return empty array
+      if (error.status === 404) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  async getLatestRelease(owner, repo) {
+    try {
+      const { data } = await this.octokit.repos.getLatestRelease({
+        owner,
+        repo
+      });
+
+      return {
+        githubReleaseId: data.id.toString(),
+        tagName: data.tag_name,
+        name: data.name,
+        body: data.body,
+        publishedAt: data.published_at ? new Date(data.published_at) : null,
+        isPrerelease: data.prerelease,
+        isDraft: data.draft
+      };
+    } catch (error) {
+      // If no releases exist, return null
+      if (error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
 }
 
 module.exports = GitHubService; 

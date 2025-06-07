@@ -1,7 +1,8 @@
 const express = require('express');
 const { Sequelize } = require('sequelize');
-const { Repo } = require('../models');
+const { Repo, Release } = require('../models');
 const { ensureAuth } = require('../middleware/auth');
+const ReleaseService = require('../services/releaseService');
 const axios = require('axios');
 
 const router = express.Router();
@@ -34,13 +35,26 @@ router.get('/repos', ensureAuth, async (req, res) => {
     const repos = await Repo.findAll({
       where,
       order: [[sort, order.toUpperCase()]],
+      include: [{
+        model: Release,
+        required: false,
+        attributes: ['tagName', 'name', 'body', 'publishedAt', 'isPrerelease', 'isDraft'],
+        limit: 1,
+        order: [['publishedAt', 'DESC']]
+      }]
     });
     
     res.json({
-      repos: repos.map(repo => ({
-        ...repo.get({ plain: true }),
-        customTags: repo.customTags || []
-      }))
+      repos: repos.map(repo => {
+        const repoData = repo.get({ plain: true });
+        return {
+          ...repoData,
+          customTags: repo.customTags || [],
+          effectiveVersion: ReleaseService.getEffectiveVersion(repo),
+          latestRelease: repoData.Releases && repoData.Releases[0] ? repoData.Releases[0] : null,
+          Releases: undefined // Remove the raw Releases array from response
+        };
+      })
     });
   } catch (error) {
     console.error('Error fetching repos:', error);
@@ -66,7 +80,7 @@ router.get('/custom-tags', ensureAuth, async (req, res) => {
   }
 });
 
-// Add this new endpoint to fetch README
+// Fetch README for a specific repository
 router.get('/repos/:owner/:repo/readme', ensureAuth, async (req, res) => {
   try {
     const { owner, repo } = req.params;
@@ -82,7 +96,32 @@ router.get('/repos/:owner/:repo/readme', ensureAuth, async (req, res) => {
     );
     res.send(response.data);
   } catch (error) {
+    console.error('Error fetching README:', error);
     res.status(404).json({ error: 'README not found' });
+  }
+});
+
+// Get repo details (this needs to be after the more specific readme route)
+router.get('/repos/:owner/:name', ensureAuth, async (req, res) => {
+  try {
+    const { owner, name } = req.params;
+    
+    // Get repo details from GitHub API
+    const response = await axios.get(`https://api.github.com/repos/${owner}/${name}`, {
+      headers: {
+        Authorization: `token ${req.user.accessToken}`,
+        'User-Agent': 'Node.js'
+      }
+    });
+
+    // Make sure to include defaultBranch in the response
+    res.json({
+      ...response.data,
+      defaultBranch: response.data.default_branch // GitHub uses snake_case
+    });
+  } catch (error) {
+    console.error('Error fetching repo details:', error);
+    res.status(500).json({ error: 'Failed to fetch repo details' });
   }
 });
 
@@ -193,29 +232,6 @@ router.post('/repos/:id/tags', ensureAuth, async (req, res) => {
   } catch (error) {
     console.error('Error updating tags:', error);
     res.status(500).json({ error: 'Failed to update tags' });
-  }
-});
-
-router.get('/repos/:owner/:name', ensureAuth, async (req, res) => {
-  try {
-    const { owner, name } = req.params;
-    
-    // Get repo details from GitHub API
-    const response = await axios.get(`https://api.github.com/repos/${owner}/${name}`, {
-      headers: {
-        Authorization: `token ${req.user.accessToken}`,
-        'User-Agent': 'Node.js'
-      }
-    });
-
-    // Make sure to include defaultBranch in the response
-    res.json({
-      ...response.data,
-      defaultBranch: response.data.default_branch // GitHub uses snake_case
-    });
-  } catch (error) {
-    console.error('Error fetching repo details:', error);
-    res.status(500).json({ error: 'Failed to fetch repo details' });
   }
 });
 

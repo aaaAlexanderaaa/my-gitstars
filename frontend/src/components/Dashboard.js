@@ -17,6 +17,7 @@ import { Sync as SyncIcon, Logout as LogoutIcon, GitHub as GitHubIcon, Settings 
 import RepoList from './RepoList';
 import TagFilter from './TagFilter';
 import RepoPreview from './RepoPreview';
+import { useReleases } from '../hooks/useReleases';
 import './Dashboard.css';
 
 function Dashboard({ user }) {
@@ -29,6 +30,9 @@ function Dashboard({ user }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [anchorEl, setAnchorEl] = useState(null);
+  const [releaseFetchLoading, setReleaseFetchLoading] = useState(false);
+  
+  const { bulkFetchReleases } = useReleases();
 
   useEffect(() => {
     console.log('Fetching repos with tags:', selectedTags);
@@ -92,6 +96,45 @@ function Dashboard({ user }) {
       fetchRepos();
     } catch (err) {
       setError('Failed to sync with GitHub');
+    }
+  };
+
+  const handleBulkFetchReleases = async () => {
+    try {
+      setReleaseFetchLoading(true);
+      
+      // Get currently filtered repositories for smart fetching
+      const filteredRepos = repos.filter(repo => {
+        // Apply the same filtering logic as RepoList
+        const tagsMatch = selectedTags.length === 0 || selectedTags.every(tag => {
+          const tagLower = tag.toLowerCase();
+          return (
+            repo.language?.toLowerCase() === tagLower ||
+            repo.topics?.includes(tagLower) ||
+            repo.customTags?.includes(tagLower)
+          );
+        });
+        return tagsMatch;
+      });
+
+      let repoIds = null;
+      let limit = 20;
+
+      // If we have active filters, only fetch for filtered repos
+      if (selectedTags.length > 0) {
+        repoIds = filteredRepos.map(repo => repo.id);
+        limit = Math.min(repoIds.length, 50); // Cap at 50 to avoid API limits
+      }
+
+      const results = await bulkFetchReleases(limit, repoIds);
+      
+      // Refresh repos to get updated release data
+      await fetchRepos();
+    } catch (err) {
+      console.error('Failed to fetch releases:', err);
+      setError('Failed to fetch repository releases');
+    } finally {
+      setReleaseFetchLoading(false);
     }
   };
 
@@ -173,7 +216,7 @@ function Dashboard({ user }) {
             </Typography>
           </Box>
 
-          <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
+          <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', gap: 2 }}>
             <Button 
               color="inherit" 
               startIcon={<SyncIcon />}
@@ -181,6 +224,17 @@ function Dashboard({ user }) {
               className="sync-button"
             >
               Sync Repositories
+            </Button>
+            
+            <Button 
+              color="inherit" 
+              startIcon={<SettingsIcon />}
+              onClick={handleBulkFetchReleases}
+              disabled={releaseFetchLoading}
+              className="sync-button"
+            >
+              {releaseFetchLoading ? 'Fetching...' : 
+               selectedTags.length > 0 ? 'Fetch Filtered Releases' : 'Fetch Releases'}
             </Button>
           </Box>
 

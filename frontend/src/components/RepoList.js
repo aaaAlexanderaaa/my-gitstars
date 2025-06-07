@@ -26,6 +26,7 @@ import {
 import './RepoList.css';
 import LanguageChip from './LanguageChip';
 import CustomTagInput from './CustomTagInput';
+import VersionSelector from './VersionSelector';
 import axios from 'axios';
 import { useTagSuggestions } from '../hooks/useTagSuggestions';
 import TagSuggestions from './TagSuggestions';
@@ -134,10 +135,26 @@ function RepoList({
       }
     });
 
+  const handleVersionChange = (repoId, currentlyUsedVersion) => {
+    // Update local repo state to reflect the version change
+    const updatedRepos = repos.map(r => 
+      r.id === repoId ? { 
+        ...r, 
+        currentlyUsedVersion, 
+        effectiveVersion: currentlyUsedVersion || r.latestVersion,
+        _noRefresh: true 
+      } : r
+    );
+    onReposUpdate(updatedRepos);
+  };
+
   const handleItemClick = (repo, event) => {
-    // Don't trigger repo selection if clicking on a link or tag
+    // Don't trigger repo selection if clicking on a link, tag, or version selector
     if (event.target.tagName.toLowerCase() === 'a' || 
-        event.target.closest('.MuiChip-root')) {
+        event.target.closest('.MuiChip-root') ||
+        event.target.closest('.MuiFormControl-root') ||
+        event.target.closest('.MuiSelect-root') ||
+        event.target.closest('.MuiIconButton-root')) {
       return;
     }
     onRepoSelect(repo);
@@ -326,23 +343,33 @@ function RepoList({
               </div>
               
               <div className="repo-footer">
-                <div className="stats">
-                  <Star sx={{ fontSize: '0.8rem' }} />
-                  {repo.stargazersCount.toLocaleString()}
-                  <GitFork sx={{ fontSize: '0.8rem' }} />
-                  {repo.forksCount.toLocaleString()}
-                </div>
-                {repo.language && (
-                  <Chip
-                    size="small"
-                    label={repo.language}
-                    className="language-chip"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleTagClick(e, repo.language);
-                    }}
+                <div className="repo-footer-left">
+                  <div className="stats">
+                    <Star sx={{ fontSize: '0.8rem' }} />
+                    {repo.stargazersCount.toLocaleString()}
+                    <GitFork sx={{ fontSize: '0.8rem' }} />
+                    {repo.forksCount.toLocaleString()}
+                  </div>
+                  
+                  <VersionSelector 
+                    repo={repo} 
+                    onVersionChange={handleVersionChange}
                   />
-                )}
+                </div>
+                
+                <div className="repo-footer-right">
+                  {repo.language && (
+                    <Chip
+                      size="small"
+                      label={repo.language}
+                      className="language-chip"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTagClick(e, repo.language);
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             </div>
           </ListItem>

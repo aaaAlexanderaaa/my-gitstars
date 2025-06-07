@@ -84,6 +84,33 @@ const Repo = sequelize.define('Repo', {
   githubUpdatedAt: {
     type: DataTypes.DATE,
     field: 'github_updated_at'
+  },
+  // Release tracking fields
+  latestVersion: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    field: 'latest_version'
+  },
+  currentlyUsedVersion: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    field: 'currently_used_version'
+  },
+  updateAvailable: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+    field: 'update_available'
+  },
+  hasReleases: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'has_releases'
+  },
+  releasesLastFetched: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'releases_last_fetched'
   }
 });
 
@@ -109,6 +136,36 @@ const SyncStatus = sequelize.define('SyncStatus', {
   underscored: true
 });
 
+const Release = sequelize.define('Release', {
+  repoId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: 'Repos',
+      key: 'id'
+    }
+  },
+  githubReleaseId: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  tagName: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  name: DataTypes.STRING,
+  body: DataTypes.TEXT,
+  publishedAt: DataTypes.DATE,
+  isPrerelease: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  isDraft: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  }
+});
+
 // Define relationships
 User.hasMany(Repo);
 Repo.belongsTo(User);
@@ -118,9 +175,14 @@ SyncStatus.belongsTo(User, {
   as: 'user'
 });
 
+// Release relationships
+Repo.hasMany(Release, { foreignKey: 'repoId' });
+Release.belongsTo(Repo, { foreignKey: 'repoId' });
+
 module.exports = {
   sequelize,
   User,
   Repo,
-  SyncStatus
+  SyncStatus,
+  Release
 }; 

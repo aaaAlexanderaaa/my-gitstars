@@ -1,6 +1,7 @@
 const { Sequelize } = require('sequelize');
 const { User, Repo, sequelize, SyncStatus } = require('../models');
 const GitHubService = require('./githubService');
+const ReleaseService = require('./releaseService');
 
 class SyncService {
   static async syncUserStars(userId) {
@@ -79,6 +80,11 @@ class SyncService {
       await syncStatus.update({
         status: 'completed',
         progress: 100
+      });
+
+      // Background fetch releases for newly synced repos (non-blocking)
+      ReleaseService.bulkFetchReleases(user.id, 30).catch(error => {
+        console.warn('Background release fetch failed:', error);
       });
     } catch (error) {
       console.error('Sync error:', error);

@@ -1,6 +1,7 @@
 const authRouter = require('../routes/auth');
 const syncRouter = require('../routes/sync');
 const reposRouter = require('../routes/repos');
+const releasesRouter = require('../routes/releases');
 const path = require('path');
 
 function configureRoutes(app) {
@@ -8,6 +9,7 @@ function configureRoutes(app) {
   app.use('/auth', authRouter);
   app.use('/api', syncRouter);
   app.use('/api', reposRouter);
+  app.use('/api/releases', releasesRouter);
 
   // Error handling middleware
   app.use((err, req, res, next) => {

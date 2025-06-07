@@ -249,6 +249,20 @@
   padding-top: 2px;
 }
 
+.repo-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.repo-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .batch-tag-input {
   padding: 8px 16px;
   background-color: #f6f8fa;
