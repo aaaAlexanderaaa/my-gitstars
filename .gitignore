@@ -1,5 +1,5 @@
 # Dependencies
-node_modules/
+**/node_modules/
 
 # Environment variables
 .env
@@ -8,8 +8,9 @@ node_modules/
 .env.production
 
 # Build outputs
-/frontend/build
-/frontend/dist
+/new_frontend/build
+/new_frontend/out
+/new_frontend/.next
 
 # Logs
 npm-debug.log*
