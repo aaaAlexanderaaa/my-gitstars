@@ -8,6 +8,7 @@
 .env.production
 
 # Build outputs
+frontend/
 /new_frontend/build
 /new_frontend/out
 /new_frontend/.next

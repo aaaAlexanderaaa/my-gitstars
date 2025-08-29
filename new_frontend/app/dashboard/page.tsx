@@ -1052,8 +1052,8 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <Star className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-semibold">GitHub Star Manager</h1>
+              <img src="/my-gitstars-logo.svg" alt="my-gitstars logo" className="h-8 w-8" />
+              <h1 className="text-xl font-semibold">my-gitstars</h1>
             </div>
             <Button onClick={handleSync} disabled={isSyncing} variant="outline" size="sm" className="border-gray-200 text-gray-600 hover:bg-gray-50">
               <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />

@@ -51,12 +51,12 @@ export default function LoginPage() {
         {/* App Header */}
         <div className="text-center space-y-4">
           <div className="flex justify-center">
-            <div className="p-3 bg-primary rounded-full">
-              <Star className="h-8 w-8 text-primary-foreground" />
+            <div className="w-16 h-16">
+              <img src="/my-gitstars-logo.svg" alt="my-gitstars logo" className="w-full h-full" />
             </div>
           </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">GitHub Star Manager</h1>
+            <h1 className="text-3xl font-bold tracking-tight">my-gitstars</h1>
             <p className="text-muted-foreground mt-2">
               Organize and track your starred repositories with smart tagging and version management
             </p>

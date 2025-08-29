@@ -5,9 +5,17 @@ import './globals.css'
 import { ThemeProvider } from '@/components/theme-provider'
 
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
-  generator: 'v0.app',
+  title: 'my-gitstars',
+  description: 'Organize and track your starred repositories with smart tagging and version management',
+  generator: 'my-gitstars',
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/my-gitstars-logo.svg', type: 'image/svg+xml' }
+    ],
+    shortcut: '/favicon.svg',
+    apple: '/my-gitstars-logo.svg',
+  },
 }
 
 export default function RootLayout({
@@ -18,6 +26,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="shortcut icon" href="/favicon.svg" />
         <style>{`
 html {
   font-family: ${GeistSans.style.fontFamily};
