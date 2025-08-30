@@ -235,6 +235,52 @@ router.post('/repos/:id/tags', ensureAuth, async (req, res) => {
   }
 });
 
+// DELETE endpoint for removing tags
+router.delete('/repos/:id/tags', ensureAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ error: 'Invalid repository ID' });
+    }
+
+    const { tags } = req.body;
+    
+    const repo = await Repo.findOne({
+      where: { 
+        id: parseInt(id),
+        UserId: req.user.id
+      }
+    });
+
+    if (!repo) {
+      return res.status(404).json({ error: 'Repository not found' });
+    }
+
+    // Validate input
+    if (typeof tags !== 'string') {
+      return res.status(400).json({ error: 'Tags must be a string' });
+    }
+
+    const existingTags = Array.isArray(repo.customTags) ? repo.customTags : [];
+    const tagToRemove = tags.trim();
+
+    // Remove the tag
+    const updatedTags = existingTags.filter(tag => tag !== tagToRemove);
+
+    await repo.update({ 
+      customTags: updatedTags 
+    });
+
+    res.json({ 
+      tags: updatedTags,
+      id: repo.id
+    });
+  } catch (error) {
+    console.error('Error removing tag:', error);
+    res.status(500).json({ error: 'Failed to remove tag' });
+  }
+});
+
 // Add new endpoint for tag counts
 router.get('/tags/counts', ensureAuth, async (req, res) => {
   try {

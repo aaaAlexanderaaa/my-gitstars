@@ -595,7 +595,7 @@ export default function DashboardPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ tag }),
+          body: JSON.stringify({ tags: tag }),
           credentials: "include",
         })
 
@@ -648,7 +648,7 @@ export default function DashboardPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ tag: tag.trim() }),
+          body: JSON.stringify({ tags: tag.trim() }),
           credentials: "include",
         })
 
@@ -857,7 +857,7 @@ export default function DashboardPage() {
         const response = await fetch(`/api/repos/${repo.id}/tags`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tag: trimmedTag }),
+          body: JSON.stringify({ tags: trimmedTag }),
           credentials: "include",
         })
 
@@ -1583,7 +1583,7 @@ function useDashboard() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ tag }),
+          body: JSON.stringify({ tags: tag }),
           credentials: "include",
         })
 
@@ -1636,7 +1636,7 @@ function useDashboard() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ tag: tag.trim() }),
+          body: JSON.stringify({ tags: tag.trim() }),
           credentials: "include",
         })
 
@@ -1845,7 +1845,7 @@ function useDashboard() {
         const response = await fetch(`/api/repos/${repo.id}/tags`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tag: trimmedTag }),
+          body: JSON.stringify({ tags: trimmedTag }),
           credentials: "include",
         })
 
