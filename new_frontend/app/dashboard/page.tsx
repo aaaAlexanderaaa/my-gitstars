@@ -570,6 +570,15 @@ export default function DashboardPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<{
+    status: string
+    progress: number
+    error: string | null
+    startedAt: string | null
+    updatedAt: string | null
+    lastCompletedAt: string | null
+  } | null>(null)
+  const previousSyncStatusRef = useRef<string | null>(null)
   const [loadingProgress, setLoadingProgress] = useState(0)
   const [selectedRepo, setSelectedRepo] = useState<Repository | null>(null)
   const [readmeContent, setReadmeContent] = useState<string>("")
@@ -679,24 +688,54 @@ export default function DashboardPage() {
 
   const handleRefreshReadme = () => {
     if (selectedRepo) {
-      handleRepoClick(selectedRepo)
+      handleRepoClick(selectedRepo, { refresh: true })
     }
+  }
+
+  // Helper to compute updateAvailable for a repository
+  const computeUpdateAvailable = (repo: Partial<Repository>): boolean => {
+    return !!(
+      repo.latestVersion &&
+      repo.currentlyUsedVersion &&
+      repo.currentlyUsedVersion !== repo.latestVersion
+    )
   }
 
   const handleVersionUpdate = (repoId: number, version: string | null) => {
     setRepositories((prev) =>
       prev.map((repo) => {
         if (repo.id === repoId) {
-          const updateAvailable = version && repo.latestVersion && version !== repo.latestVersion
+          const merged = { ...repo, currentlyUsedVersion: version || "" }
           return {
-            ...repo,
-            currentlyUsedVersion: version || "",
-            updateAvailable: !!updateAvailable,
+            ...merged,
+            updateAvailable: computeUpdateAvailable(merged),
           }
         }
         return repo
       }),
     )
+  }
+
+  const handleRepositoryUpdate = (repoId: number, patch: Partial<Repository>) => {
+    setRepositories((prev) =>
+      prev.map((repo) => {
+        if (repo.id !== repoId) return repo
+        const merged = { ...repo, ...patch }
+        return {
+          ...merged,
+          updateAvailable: patch.updateAvailable ?? computeUpdateAvailable(merged),
+        }
+      }),
+    )
+
+    setSelectedRepo((prev) => {
+      if (!prev || prev.id !== repoId) return prev
+      const merged = { ...prev, ...patch } as Repository
+      return {
+        ...merged,
+        updateAvailable: patch.updateAvailable ?? computeUpdateAvailable(merged),
+      }
+    })
   }
 
   const handleLogout = async () => {
@@ -969,6 +1008,36 @@ export default function DashboardPage() {
     }
   }, [sortBy, sortOrder, cacheKey, repositories.length, lastFetchTime])
 
+  const fetchSyncStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/sync/status", {
+        credentials: "include",
+      })
+
+      if (!response.ok) return
+      const data = await response.json()
+
+      setSyncStatus(data)
+      const inProgress = data?.status === "in_progress"
+      setIsSyncing(inProgress)
+
+      const previousStatus = previousSyncStatusRef.current
+      previousSyncStatusRef.current = data?.status ?? null
+
+      if (previousStatus === "in_progress" && data?.status === "completed") {
+        await loadRepositories(true)
+      }
+    } catch (error) {
+      console.error("Failed to fetch sync status:", error)
+    }
+  }, [loadRepositories])
+
+  useEffect(() => {
+    fetchSyncStatus()
+    const intervalId = setInterval(fetchSyncStatus, 5000)
+    return () => clearInterval(intervalId)
+  }, [fetchSyncStatus])
+
   const handleSync = async () => {
     setIsSyncing(true)
     try {
@@ -978,21 +1047,21 @@ export default function DashboardPage() {
       })
 
       if (response.ok) {
-        await loadRepositories(true) // Force refresh after sync
+        await fetchSyncStatus()
       } else {
         console.log("[v0] Simulating sync with mock data")
         await new Promise((resolve) => setTimeout(resolve, 1000))
         setRepositories(mockRepositories)
+        setIsSyncing(false)
       }
     } catch (error) {
       console.error("Sync failed:", error)
       setRepositories(mockRepositories)
-    } finally {
       setIsSyncing(false)
     }
   }
 
-  const handleRepoClick = async (repo: Repository) => {
+  const handleRepoClick = async (repo: Repository, options?: { refresh?: boolean }) => {
     console.log("[v0] handleRepoClick called with repo:", repo.name)
     setSelectedRepo(repo)
     console.log("[v0] selectedRepo state updated, should open modal")
@@ -1000,7 +1069,8 @@ export default function DashboardPage() {
     setReadmeContent("")
 
     try {
-        const response = await fetch(`/api/repos/${repo.fullName}/readme`, {
+        const refreshQuery = options?.refresh ? "?refresh=true" : ""
+        const response = await fetch(`/api/repos/${repo.fullName}/readme${refreshQuery}`, {
           headers: {},
           credentials: "include",
         })
@@ -1055,10 +1125,33 @@ export default function DashboardPage() {
               <img src="/my-gitstars-logo.svg" alt="my-gitstars logo" className="h-8 w-8" />
               <h1 className="text-xl font-semibold">my-gitstars</h1>
             </div>
-            <Button onClick={handleSync} disabled={isSyncing} variant="outline" size="sm" className="border-gray-200 text-gray-600 hover:bg-gray-50">
-              <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />
-              {isSyncing ? "Syncing..." : "Sync"}
-            </Button>
+            <div className="flex flex-col gap-1">
+              <Button onClick={handleSync} disabled={isSyncing} variant="outline" size="sm" className="border-gray-200 text-gray-600 hover:bg-gray-50">
+                <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />
+                {isSyncing ? `Syncing ${Math.round(syncStatus?.progress ?? 0)}%` : "Sync"}
+              </Button>
+              <div className="text-xs text-muted-foreground">
+                {syncStatus?.status === "failed" && syncStatus.error ? (
+                  <span className="text-destructive">Sync failed: {syncStatus.error}</span>
+                ) : syncStatus?.lastCompletedAt ? (
+                  <span>
+                    Last sync:{" "}
+                    {new Date(syncStatus.lastCompletedAt).toLocaleString(undefined, {
+                      year: "numeric",
+                      month: "short",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                ) : (
+                  <span>Last sync: —</span>
+                )}
+              </div>
+              {isSyncing && (
+                <Progress value={Math.round(syncStatus?.progress ?? 0)} className="h-1" />
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-4">
@@ -1175,14 +1268,14 @@ export default function DashboardPage() {
 
           {/* Repository Grid */}
           <div className="flex-1 min-w-0 overflow-y-auto">
-            {isLoading || isSyncing ? (
+            {isLoading ? (
               <div className="flex items-center justify-center h-full">
                 <div className="flex flex-col items-center gap-4 w-64">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                   <p className="text-sm text-muted-foreground">
-                    {isLoading ? "Loading repositories..." : "Syncing with GitHub..."}
+                    Loading repositories...
                   </p>
-                  {(isLoading || isSyncing) && loadingProgress > 0 && (
+                  {loadingProgress > 0 && (
                     <div className="w-full">
                       <Progress value={loadingProgress} className="h-2" />
                       <p className="text-xs text-muted-foreground mt-1 text-center">
@@ -1218,6 +1311,7 @@ export default function DashboardPage() {
         isLoadingReadme={isLoadingReadme}
         onRefreshReadme={handleRefreshReadme}
         onVersionUpdate={handleVersionUpdate}
+        onRepositoryUpdate={handleRepositoryUpdate}
         onRemoveTag={handleRemoveTag}
         onAddTag={handleAddTag}
       />
@@ -1545,515 +1639,4 @@ const RepositoryGrid: React.FC<RepositoryGridProps> = ({ repositories, handleRep
       </div>
     </div>
   )
-}
-
-
-const useRepositoryDetails = () => {
-  const { handleRepoClick } = useDashboard()
-  return {
-    handleRepoClick, // Use the main component's handleRepoClick function
-  }
-}
-
-function useDashboard() {
-  const [user, setUser] = useState<User | null>(null)
-  const [repositories, setRepositories] = useState<Repository[]>([])
-  const [selectedTags, setSelectedTags] = useState<string[]>([])
-  const [searchQuery, setSearchQuery] = useState("")
-  const [sortBy, setSortBy] = useState<"starredAt" | "stargazersCount" | "name">("starredAt")
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [selectedRepo, setSelectedRepo] = useState<Repository | null>(null)
-  const [readmeContent, setReadmeContent] = useState<string>("")
-  const [isLoadingReadme, setIsLoadingReadme] = useState(false)
-  const [editingTags, setEditingTags] = useState<{ [key: number]: boolean }>({})
-  const [newTagInputs, setNewTagInputs] = useState<{ [key: number]: string }>({})
-  const [updatingTags, setUpdatingTags] = useState<{ [key: number]: boolean }>({})
-  const [activeAdvancedFilters, setActiveAdvancedFilters] = useState<AdvancedFilter[]>([])
-  const [lastFetchTime, setLastFetchTime] = useState<number>(0)
-  const [cacheKey, setCacheKey] = useState<string>("")
-  const router = useRouter()
-
-  const handleRemoveTag = async (repoId: number, tag: string) => {
-    setUpdatingTags((prev) => ({ ...prev, [repoId]: true }))
-    try {
-      const response = await fetch(`/api/repos/${repoId}/tags`, {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ tags: tag }),
-          credentials: "include",
-        })
-
-        if (response.ok) {
-          setRepositories((prev) =>
-            prev.map((repo) =>
-              repo.id === repoId ? { ...repo, customTags: repo.customTags.filter((t) => t !== tag) } : repo,
-            ),
-          )
-      }
-    } catch (error) {
-      console.error("Failed to remove tag:", error)
-    } finally {
-      setUpdatingTags((prev) => ({ ...prev, [repoId]: false }))
-    }
-  }
-
-  const validateTag = (tag: string): { isValid: boolean; error?: string } => {
-    const trimmed = tag.trim()
-    if (!trimmed) return { isValid: false, error: "Tag cannot be empty" }
-    if (trimmed.length > 50) return { isValid: false, error: "Tag must be 50 characters or less" }
-    if (!/^[a-zA-Z0-9._-]+$/.test(trimmed)) return { isValid: false, error: "Tag can only contain letters, numbers, dots, hyphens, and underscores" }
-    return { isValid: true }
-  }
-
-  const handleAddTag = async (repoId: number, tag: string) => {
-    const validation = validateTag(tag)
-    if (!validation.isValid) {
-      setTagErrors((prev) => ({ ...prev, [repoId]: validation.error! }))
-      setTimeout(() => setTagErrors((prev) => ({ ...prev, [repoId]: "" })), 3000)
-      return
-    }
-
-    const trimmedTag = tag.trim()
-    // Check if tag already exists
-    const repo = repositories.find(r => r.id === repoId)
-    if (repo?.customTags.includes(trimmedTag)) {
-      setTagErrors((prev) => ({ ...prev, [repoId]: "Tag already exists for this repository" }))
-      setTimeout(() => setTagErrors((prev) => ({ ...prev, [repoId]: "" })), 3000)
-      return
-    }
-
-    // Clear any existing error
-    setTagErrors((prev) => ({ ...prev, [repoId]: "" }))
-
-    setUpdatingTags((prev) => ({ ...prev, [repoId]: true }))
-    try {
-      const response = await fetch(`/api/repos/${repoId}/tags`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ tags: tag.trim() }),
-          credentials: "include",
-        })
-
-        if (response.ok) {
-          setRepositories((prev) =>
-            prev.map((repo) => (repo.id === repoId ? { ...repo, customTags: [...repo.customTags, tag.trim()] } : repo)),
-          )
-        }
-      } catch (error) {
-        console.error("Failed to add tag:", error)
-        // Optimistically update UI even on error
-        setRepositories((prev) =>
-          prev.map((repo) => (repo.id === repoId ? { ...repo, customTags: [...repo.customTags, tag.trim()] } : repo)),
-        )
-      } finally {
-        setNewTagInputs((prev) => ({ ...prev, [repoId]: "" }))
-        setEditingTags((prev) => ({ ...prev, [repoId]: false }))
-        setUpdatingTags((prev) => ({ ...prev, [repoId]: false }))
-      }
-  }
-
-  const toggleTagEditing = (repoId: number) => {
-    setEditingTags((prev) => ({ ...prev, [repoId]: !prev[repoId] }))
-    if (!editingTags[repoId]) {
-      setNewTagInputs((prev) => ({ ...prev, [repoId]: "" }))
-    }
-  }
-
-  const handleRefreshReadme = () => {
-    if (selectedRepo) {
-      handleRepoClick(selectedRepo)
-    }
-  }
-
-  const handleVersionUpdate = (repoId: number, version: string | null) => {
-    setRepositories((prev) =>
-      prev.map((repo) => {
-        if (repo.id === repoId) {
-          const updateAvailable = version && repo.latestVersion && version !== repo.latestVersion
-          return {
-            ...repo,
-            currentlyUsedVersion: version || "",
-            updateAvailable: !!updateAvailable,
-          }
-        }
-        return repo
-      }),
-    )
-  }
-
-  const handleLogout = async () => {
-    try {
-      await fetch("/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      })
-      router.push("/")
-    } catch (error) {
-      console.error("Logout failed:", error)
-      router.push("/")
-    }
-  }
-
-  const handleTagToggle = (tag: string) => {
-    setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
-  }
-
-  const handleClearFilters = () => {
-    setSelectedTags([])
-    setActiveAdvancedFilters([])
-  }
-
-  const evaluateAdvancedFilter = useCallback((repo: Repository, expression: string): boolean => {
-    if (!expression.trim()) return true
-
-    try {
-      let expr = expression.toLowerCase()
-
-      const allTags = [
-        ...repo.customTags.map((t) => t.toLowerCase()),
-        ...repo.topics.map((t) => t.toLowerCase()),
-        ...(repo.language ? [repo.language.toLowerCase()] : []),
-      ]
-
-      const tagMatches = expr.match(/\b[a-z0-9-_]+\b/g) || []
-      const uniqueTags = [...new Set(tagMatches.filter((tag) => !["and", "or", "not"].includes(tag)))]
-
-      uniqueTags.forEach((tag) => {
-        const hasTag = allTags.includes(tag)
-        expr = expr.replace(new RegExp(`\\b${tag}\\b`, "g"), hasTag.toString())
-      })
-
-      expr = expr.replace(/\band\b/g, "&&")
-      expr = expr.replace(/\bor\b/g, "||")
-      expr = expr.replace(/\bnot\b/g, "!")
-
-      return Function(`"use strict"; return (${expr})`)()
-    } catch (error) {
-      console.warn("Invalid filter expression:", expression)
-      return true
-    }
-  }, [])
-
-  const getFilteredRepositories = useCallback((repos: Repository[]) => {
-    let filtered = [...repos]
-
-    // Apply search query first
-    if (searchQuery) {
-      filtered = filtered.filter((repo) => {
-        const matchesSearch =
-          repo.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          repo.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          repo.owner.toLowerCase().includes(searchQuery.toLowerCase())
-        return matchesSearch
-      })
-    }
-
-    // Apply tag filters (AND relationship between selected tags)
-    if (selectedTags.length > 0) {
-      filtered = filtered.filter((repo) =>
-        selectedTags.every(
-          (tag) =>
-            repo.customTags.some((t) => t.toLowerCase() === tag.toLowerCase()) ||
-            repo.topics.some((t) => t.toLowerCase() === tag.toLowerCase()) ||
-            (repo.language && repo.language.toLowerCase() === tag.toLowerCase()),
-        ),
-      )
-    }
-
-    // Apply all advanced filters (AND relationship)
-    activeAdvancedFilters.forEach((filter) => {
-      filtered = filtered.filter((repo) => evaluateAdvancedFilter(repo, filter.expression))
-    })
-
-    filtered.sort((a, b) => {
-      let aVal, bVal
-      switch (sortBy) {
-        case "starredAt":
-          aVal = new Date(a.starredAt).getTime()
-          bVal = new Date(b.starredAt).getTime()
-          break
-        case "stargazersCount":
-          aVal = a.stargazersCount
-          bVal = b.stargazersCount
-          break
-        case "name":
-          aVal = a.name.toLowerCase()
-          bVal = b.name.toLowerCase()
-          break
-        default:
-          return 0
-      }
-
-      if (sortOrder === "desc") {
-        return bVal > aVal ? 1 : -1
-      } else {
-        return aVal > bVal ? 1 : -1
-      }
-    })
-
-    return filtered
-  }, [searchQuery, selectedTags, activeAdvancedFilters, evaluateAdvancedFilter, sortBy, sortOrder])
-
-  const handleAddAdvancedFilter = (expression: string) => {
-    if (expression.trim()) {
-      const newFilter: AdvancedFilter = {
-        id: Date.now().toString(),
-        expression: expression.trim(),
-      }
-      setActiveAdvancedFilters((prev) => [...prev, newFilter])
-    }
-  }
-
-  const handleRemoveAdvancedFilter = (filterId: string) => {
-    setActiveAdvancedFilters((prev) => prev.filter((f) => f.id !== filterId))
-  }
-
-  const handleBatchAddTag = async () => {
-    const trimmedTag = batchTagInput.trim()
-    
-    const validation = validateTag(trimmedTag)
-    if (!validation.isValid) {
-      setBatchTagError(validation.error!)
-      setTimeout(() => setBatchTagError(""), 3000)
-      return
-    }
-
-    setBatchTagError("")
-    const currentFilteredRepos = getFilteredRepositories(repositories)
-    const reposToUpdate = currentFilteredRepos.filter(repo => !repo.customTags.includes(trimmedTag))
-    
-    if (reposToUpdate.length === 0) {
-      setBatchTagError("All filtered repositories already have this tag")
-      setTimeout(() => setBatchTagError(""), 3000)
-      return
-    }
-
-    setIsBatchTagging(true)
-    setBatchTagProgress({ current: 0, total: reposToUpdate.length })
-
-    let successCount = 0
-    for (let i = 0; i < reposToUpdate.length; i++) {
-      const repo = reposToUpdate[i]
-      
-      try {
-        const response = await fetch(`/api/repos/${repo.id}/tags`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tags: trimmedTag }),
-          credentials: "include",
-        })
-
-        if (response.ok) {
-          setRepositories((prev) =>
-            prev.map((r) => (r.id === repo.id ? { ...r, customTags: [...r.customTags, trimmedTag] } : r)),
-          )
-          successCount++
-        }
-      } catch (error) {
-        console.error(`Failed to add tag to repo ${repo.id}:`, error)
-        setRepositories((prev) =>
-          prev.map((r) => (r.id === repo.id ? { ...r, customTags: [...r.customTags, trimmedTag] } : r)),
-        )
-        successCount++
-      }
-
-      setBatchTagProgress({ current: i + 1, total: reposToUpdate.length })
-      if (i < reposToUpdate.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 50))
-      }
-    }
-
-    setIsBatchTagging(false)
-    setBatchTagInput("")
-    setBatchTagProgress({ current: 0, total: 0 })
-    setBatchTagError(`Successfully added tag to ${successCount} repositories`)
-    setTimeout(() => setBatchTagError(""), 4000)
-  }
-
-  const filteredRepositories = getFilteredRepositories(repositories)
-
-  useEffect(() => {
-    const initializeApp = async () => {
-      try {
-        const userResponse = await fetch("/auth/user", {
-          credentials: "include",
-        })
-
-        if (!userResponse.ok) {
-          console.log("[v0] Using mock data for preview environment")
-          setUser(mockUser)
-          setRepositories(mockRepositories)
-          setIsLoading(false)
-          return
-        }
-
-        const userData = await userResponse.json()
-        setUser(userData)
-
-        await Promise.all([loadRepositories()])
-      } catch (error) {
-        console.error("Failed to initialize app:", error)
-        console.log("[v0] API unavailable, using mock data")
-        setUser(mockUser)
-        setRepositories(mockRepositories)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    initializeApp()
-  }, [router])
-
-  const loadRepositories = useCallback(async (forceRefresh = false) => {
-    // Create cache key from current params
-    const currentCacheKey = `${sortBy}-${sortOrder}`
-    const now = Date.now()
-    const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
-    
-    // Check if we can use cached data (only for non-tag filter changes)
-    if (!forceRefresh && 
-        cacheKey === currentCacheKey && 
-        repositories.length > 0 && 
-        (now - lastFetchTime) < CACHE_DURATION) {
-      console.log("[Cache] Using cached repositories data")
-      return
-    }
-
-    try {
-      const headers: HeadersInit = {
-        "Content-Type": "application/json",
-      }
-
-      const params = new URLSearchParams({
-        sort: sortBy,
-        order: sortOrder,
-      })
-
-      const response = await fetch(`/api/repos?${params}`, {
-        credentials: "include",
-        headers,
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        const repos = data.repos || data
-        setRepositories(repos)
-        setLastFetchTime(now)
-        setCacheKey(currentCacheKey)
-        console.log("[API] Loaded fresh repositories data:", repos.length, "repos")
-      } else {
-        console.log("[v0] API unavailable, using mock data")
-        setRepositories(mockRepositories)
-      }
-    } catch (error) {
-      console.error("Failed to load repositories:", error)
-      setRepositories(mockRepositories)
-    }
-  }, [sortBy, sortOrder, cacheKey, repositories.length, lastFetchTime])
-
-  const handleSync = async () => {
-    setIsSyncing(true)
-    try {
-      const response = await fetch("/api/sync", {
-        method: "POST",
-        credentials: "include",
-      })
-
-      if (response.ok) {
-        await loadRepositories(true) // Force refresh after sync
-      } else {
-        console.log("[v0] Simulating sync with mock data")
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-        setRepositories(mockRepositories)
-      }
-    } catch (error) {
-      console.error("Sync failed:", error)
-      setRepositories(mockRepositories)
-    } finally {
-      setIsSyncing(false)
-    }
-  }
-
-  const handleRepoClick = async (repo: Repository) => {
-    console.log("[v0] handleRepoClick called with repo:", repo.name)
-    setSelectedRepo(repo)
-    console.log("[v0] selectedRepo state updated, should open modal")
-    setIsLoadingReadme(true)
-    setReadmeContent("")
-
-    try {
-        const response = await fetch(`/api/repos/${repo.fullName}/readme`, {
-          headers: {},
-          credentials: "include",
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          setReadmeContent(data.content || data)
-        } else {
-          console.log("[v0] Using mock README content")
-          setReadmeContent(mockReadmeContent)
-        }
-    } catch (error) {
-      console.error("Failed to load README:", error)
-      setReadmeContent(mockReadmeContent)
-    } finally {
-      setIsLoadingReadme(false)
-    }
-  }
-
-  useEffect(() => {
-      // Only load if sorting/ordering changes, tags are applied via client-side filtering
-      if (sortBy !== "starredAt" || sortOrder !== "desc") {
-        loadRepositories()
-      }
-  }, [sortBy, sortOrder, loadRepositories])
-
-  useEffect(() => {
-    ;(window as any).TagCalculator = TagCalculator
-  }, [])
-
-  const displayedRepositories = getFilteredRepositories(repositories)
-
-  return {
-    user,
-    repositories,
-    selectedTags,
-    searchQuery,
-    sortBy,
-    sortOrder,
-    isLoading,
-    isSyncing,
-    selectedRepo,
-    readmeContent,
-    isLoadingReadme,
-    editingTags,
-    newTagInputs,
-    updatingTags,
-    activeAdvancedFilters,
-    router,
-    handleRemoveTag,
-    handleAddTag,
-    toggleTagEditing,
-    handleRefreshReadme,
-    handleVersionUpdate,
-    handleLogout,
-    handleTagToggle,
-    handleClearFilters,
-    evaluateAdvancedFilter,
-    getFilteredRepositories,
-    handleAddAdvancedFilter,
-    handleRemoveAdvancedFilter,
-    filteredRepositories,
-    loadRepositories,
-    handleSync,
-    handleRepoClick,
-    setRepositories,
-  }
 }

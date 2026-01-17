@@ -6,6 +6,7 @@ const { sequelize } = require('./models');
 const { configurePassport } = require('./config/passport');
 const { configureMiddleware } = require('./config/middleware');
 const { configureRoutes } = require('./config/routes');
+const { startSchedulers } = require('./services/schedulerService');
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -27,10 +28,31 @@ async function start() {
   try {
     await sequelize.authenticate();
     console.log('Database connection established');
-    
-    app.listen(port, () => {
+
+    const schedulers = startSchedulers();
+
+    const server = app.listen(port, () => {
       console.log(`Server running on port ${port}`);
     });
+
+    // Graceful shutdown handling
+    const shutdown = async (signal) => {
+      console.log(`\n${signal} received. Shutting down gracefully...`);
+      schedulers.stop();
+      server.close(async () => {
+        console.log('HTTP server closed');
+        try {
+          await sequelize.close();
+          console.log('Database connection closed');
+        } catch (err) {
+          console.error('Error closing database connection:', err);
+        }
+        process.exit(0);
+      });
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
   } catch (error) {
     console.error('Unable to start server:', error);
     process.exit(1);

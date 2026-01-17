@@ -7,6 +7,73 @@ const axios = require('axios');
 
 const router = express.Router();
 
+const README_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const README_CACHE_MAX_SIZE = 1000; // Maximum number of cached READMEs
+
+/**
+ * Simple LRU cache implementation for README content.
+ * Uses a Map which maintains insertion order, allowing O(1) operations.
+ */
+class LRUCache {
+  constructor(maxSize, ttlMs) {
+    this.maxSize = maxSize;
+    this.ttlMs = ttlMs;
+    this.cache = new Map();
+  }
+
+  get(key) {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+
+    // Check if expired
+    if (entry.expiresAt < Date.now()) {
+      this.cache.delete(key);
+      return undefined;
+    }
+
+    // Move to end (most recently used) by re-inserting
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+    return entry.content;
+  }
+
+  set(key, content) {
+    // Remove existing entry if present (to update position)
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+
+    // Evict oldest entries if at capacity (first entries are oldest due to Map order)
+    while (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+
+    this.cache.set(key, {
+      content,
+      expiresAt: Date.now() + this.ttlMs
+    });
+  }
+
+  has(key) {
+    const entry = this.cache.get(key);
+    if (!entry) return false;
+    if (entry.expiresAt < Date.now()) {
+      this.cache.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  // Get content even if expired (for fallback on errors)
+  getStale(key) {
+    const entry = this.cache.get(key);
+    return entry ? entry.content : undefined;
+  }
+}
+
+const readmeCache = new LRUCache(README_CACHE_MAX_SIZE, README_CACHE_TTL_MS);
+
 // Get repos with pagination
 router.get('/repos', ensureAuth, async (req, res) => {
   try {
@@ -84,9 +151,20 @@ router.get('/custom-tags', ensureAuth, async (req, res) => {
 router.get('/repos/:owner/:repo/readme', ensureAuth, async (req, res) => {
   try {
     const { owner, repo } = req.params;
+    const refresh = req.query.refresh === 'true';
+    const cacheKey = `${req.user.id}:${owner}/${repo}`;
+
+    if (!refresh) {
+      const cached = readmeCache.get(cacheKey);
+      if (cached) {
+        return res.send(cached);
+      }
+    }
+
     const response = await axios.get(
       `https://api.github.com/repos/${owner}/${repo}/readme`,
       {
+        timeout: 8000,
         headers: {
           Accept: 'application/vnd.github.raw',
           Authorization: `token ${req.user.accessToken}`,
@@ -94,9 +172,18 @@ router.get('/repos/:owner/:repo/readme', ensureAuth, async (req, res) => {
         }
       }
     );
+
+    readmeCache.set(cacheKey, response.data);
     res.send(response.data);
   } catch (error) {
     console.error('Error fetching README:', error);
+
+    const cacheKey = `${req.user.id}:${req.params.owner}/${req.params.repo}`;
+    const cached = readmeCache.getStale(cacheKey);
+    if (cached) {
+      return res.send(cached);
+    }
+
     res.status(404).json({ error: 'README not found' });
   }
 });

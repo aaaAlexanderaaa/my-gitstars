@@ -1,5 +1,6 @@
 const express = require('express');
 const ReleaseService = require('../services/releaseService');
+const { Repo } = require('../models');
 const router = express.Router();
 
 // Middleware to ensure user is authenticated
@@ -15,16 +16,37 @@ router.get('/repo/:repoId', requireAuth, async (req, res) => {
   try {
     const { repoId } = req.params;
     const { refresh } = req.query;
+
+    const repo = await Repo.findOne({
+      where: { id: parseInt(repoId), UserId: req.user.id }
+    });
+
+    if (!repo) {
+      return res.status(404).json({
+        success: false,
+        error: 'Repository not found'
+      });
+    }
     
     const releases = await ReleaseService.getRepositoryReleases(
-      parseInt(repoId), 
+      repo.id,
       req.user, 
       refresh === 'true'
     );
 
+    await repo.reload();
+
     res.json({
       success: true,
-      releases
+      releases,
+      repo: {
+        id: repo.id,
+        latestVersion: repo.latestVersion,
+        currentlyUsedVersion: repo.currentlyUsedVersion,
+        updateAvailable: repo.updateAvailable,
+        hasReleases: repo.hasReleases,
+        releasesLastFetched: repo.releasesLastFetched
+      }
     });
   } catch (error) {
     console.error('Error fetching repository releases:', error);

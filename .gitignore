@@ -1,5 +1,12 @@
+# vibe
+AGENTS.md
+CLAUDE.md
+.claude/
+.codex/
+
 # Dependencies
 **/node_modules/
+.venv/
 
 # Environment variables
 .env

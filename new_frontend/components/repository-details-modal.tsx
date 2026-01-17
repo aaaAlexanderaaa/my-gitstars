@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { VersionTracker } from "@/components/version-tracker"
-import { RefreshCw, AlertTriangle, BookOpen, GitBranch } from "lucide-react"
+import { RefreshCw, AlertTriangle, BookOpen } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeRaw from "rehype-raw"
@@ -37,6 +37,7 @@ interface RepositoryDetailsModalProps {
   isLoadingReadme: boolean
   onRefreshReadme: () => void
   onVersionUpdate: (repoId: number, version: string | null) => void
+  onRepositoryUpdate?: (repoId: number, patch: Partial<Repository>) => void
   onRemoveTag: (repoId: number, tag: string) => Promise<void>
   onAddTag: (repoId: number, tag: string) => Promise<void>
 }
@@ -49,6 +50,7 @@ export function RepositoryDetailsModal({
   isLoadingReadme,
   onRefreshReadme,
   onVersionUpdate,
+  onRepositoryUpdate,
   onRemoveTag,
   onAddTag,
 }: RepositoryDetailsModalProps) {
@@ -56,24 +58,50 @@ export function RepositoryDetailsModal({
   const [newTag, setNewTag] = useState("")
   const [isUpdatingTags, setIsUpdatingTags] = useState(false)
   const [localRepository, setLocalRepository] = useState(repository)
+  const [activeTab, setActiveTab] = useState<"readme" | "versions">("readme")
 
-  // Update local repository when prop changes
+  // Track the previous repository ID to detect actual repo changes vs. prop updates
+  const prevRepoIdRef = useRef<number | null>(null)
+
+  // Update local repository when prop changes (but don't reset tab)
   useEffect(() => {
     setLocalRepository(repository)
   }, [repository])
 
-  // Handle version update locally
-  const handleVersionUpdate = (repoId: number, version: string | null) => {
-    if (localRepository && localRepository.id === repoId) {
-      const updatedRepo = {
-        ...localRepository,
-        currentlyUsedVersion: version,
-        updateAvailable: version && localRepository.latestVersion ? version !== localRepository.latestVersion : false
-      }
-      setLocalRepository(updatedRepo)
+  // Reset tab only when repository ID actually changes (not on every prop update)
+  useEffect(() => {
+    const currentId = repository?.id ?? null
+    if (prevRepoIdRef.current !== null && prevRepoIdRef.current !== currentId) {
+      // ID changed - reset to readme tab
+      setActiveTab("readme")
     }
+    prevRepoIdRef.current = currentId
+  }, [repository?.id])
+
+  const handleRepositoryMetaUpdate = useCallback((repoId: number, patch: Partial<Repository>) => {
+    setLocalRepository((currentRepository) => {
+      if (!currentRepository || currentRepository.id !== repoId) return currentRepository
+      const merged = { ...currentRepository, ...patch }
+      const latestVersion = merged.latestVersion
+      const currentVersion = merged.currentlyUsedVersion
+      const updateAvailable = !!(latestVersion && currentVersion && currentVersion !== latestVersion)
+      return { ...merged, updateAvailable }
+    })
+    onRepositoryUpdate?.(repoId, patch)
+  }, [onRepositoryUpdate])
+
+  // Handle version update locally
+  const handleVersionUpdate = useCallback((repoId: number, version: string | null) => {
+    setLocalRepository((currentRepository) => {
+      if (!currentRepository || currentRepository.id !== repoId) return currentRepository
+      return {
+        ...currentRepository,
+        currentlyUsedVersion: version,
+        updateAvailable: version && currentRepository.latestVersion ? version !== currentRepository.latestVersion : false,
+      }
+    })
     onVersionUpdate?.(repoId, version)
-  }
+  }, [onVersionUpdate])
 
   if (!localRepository) return null
 
@@ -106,7 +134,7 @@ export function RepositoryDetailsModal({
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent
-        className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col"
+        className="max-w-6xl w-[95vw] h-[90vh] overflow-hidden flex flex-col"
         aria-describedby="repository-details-description"
       >
         <DialogHeader>
@@ -127,15 +155,15 @@ export function RepositoryDetailsModal({
         </DialogHeader>
 
         <div className="flex-1 overflow-hidden">
-          <Tabs defaultValue="readme" className="h-full flex flex-col">
-            <TabsList className="grid w-full grid-cols-2">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "readme" | "versions")} className="h-full flex flex-col">
+            <TabsList className="grid w-full grid-cols-2 shrink-0">
               <TabsTrigger value="readme">README</TabsTrigger>
               <TabsTrigger value="versions">Changelog</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="readme" className="flex-1 overflow-y-auto">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
+            <TabsContent value="readme" className="flex-1 overflow-hidden mt-0" style={{ minHeight: 0 }}>
+              <div className="flex flex-col h-full">
+                <div className="flex items-center justify-between mb-4 shrink-0">
                   <h4 className="text-sm font-medium flex items-center gap-2">
                     <BookOpen className="h-4 w-4" />
                     README.md
@@ -151,8 +179,8 @@ export function RepositoryDetailsModal({
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                   </div>
                 ) : readmeContent ? (
-                  <div className="bg-white dark:bg-gray-900 border rounded-lg overflow-hidden shadow-sm">
-                    <div className="p-6 overflow-y-auto max-h-[65vh]">
+                  <div className="bg-white dark:bg-gray-900 border rounded-lg overflow-hidden shadow-sm flex-1 flex flex-col">
+                    <div className="p-6 overflow-y-auto flex-1">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         rehypePlugins={[
@@ -243,7 +271,8 @@ export function RepositoryDetailsModal({
                             return (
                               <img
                                 src={imageSrc}
-                                alt={alt || ""}
+                                alt={alt || "Repository image"}
+                                loading="lazy"
                                 className="max-w-full h-auto rounded border border-gray-200 dark:border-gray-700 my-4"
                                 onError={(e) => {
                                   const target = e.target as HTMLImageElement
@@ -358,13 +387,17 @@ export function RepositoryDetailsModal({
               </div>
             </TabsContent>
 
-            <TabsContent value="versions" className="flex-1 overflow-y-auto">
-              <div className="space-y-4">
-                <h4 className="text-sm font-medium flex items-center gap-2">
-                  <GitBranch className="h-4 w-4" />
-                  Version Tracking & Changelog
-                </h4>
-                <VersionTracker repository={localRepository} onVersionUpdate={handleVersionUpdate} />
+            <TabsContent value="versions" className="flex-1 overflow-hidden mt-0" style={{ minHeight: 0 }}>
+              <div className="flex flex-col h-full">
+                {activeTab === "versions" ? (
+                  <VersionTracker
+                    repository={localRepository}
+                    onVersionUpdate={handleVersionUpdate}
+                    onRepositoryMetaUpdate={handleRepositoryMetaUpdate}
+                  />
+                ) : (
+                  <div className="text-sm text-muted-foreground">Select the "Changelog" tab to load releases.</div>
+                )}
               </div>
             </TabsContent>
           </Tabs>

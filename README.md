@@ -53,16 +53,23 @@ git clone https://github.com/aaaAlexanderaaa/my-gitstars
 cp .env.example .env
 ```
 Then fill your `GITHUB_CLIENT_SECRET` and `GITHUB_CLIENT_ID`
-3. Start the application:
+3. Start the application (choose one):
+
+- Use the bundled Postgres container:
 ```
-docker compose build
+docker compose --profile local-db up --build
+```
+
+- Use an external Postgres (set `DB_HOST` / `DB_PORT` in `.env`):
+```
+docker compose up --build
 ```
 
 4. Visit `http://localhost:4000` in your browser
 
 ### Development
 
-- Frontend development server: `cd frontend && npm run dev`
+- Frontend development server: `cd new_frontend && npm run dev`
 - Backend development server: `cd backend && npm run dev`
 - Database migrations: `cd backend && npm run migrate`
 

@@ -1,24 +1,38 @@
 const { Repo, Release, User } = require('../models');
 const GitHubService = require('./githubService');
+const { Op } = require('sequelize');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const BULK_FETCH_DELAY_MS = 1000; // 1 second delay between repos in bulk fetch
+const MAX_BULK_FETCH_LIMIT = 50; // Maximum repos to process in a single bulk fetch (rate limit safety)
+
+// Helper to delay execution
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 class ReleaseService {
   /**
    * Fetch and store releases for a specific repository
    * @param {number} repoId - Internal repository ID
    * @param {Object} user - User object with access token
+   * @param {GitHubService} [githubService] - Optional shared GitHubService instance for rate limit tracking
    * @returns {Promise<Array>} Array of releases
    */
-  static async fetchAndStoreReleases(repoId, user) {
+  static async fetchAndStoreReleases(repoId, user, githubService = null) {
     const repo = await Repo.findByPk(repoId);
     if (!repo) {
       throw new Error('Repository not found');
     }
 
-    const githubService = new GitHubService(user.accessToken);
-    
+    if (repo.UserId !== user.id) {
+      throw new Error('Repository not found or access denied');
+    }
+
+    // Use provided GitHubService or create a new one
+    const ghService = githubService || new GitHubService(user.accessToken);
+
     try {
       // Fetch releases from GitHub
-      const releases = await githubService.getRepositoryReleases(repo.owner, repo.name);
+      const releases = await ghService.getRepositoryReleases(repo.owner, repo.name);
       
       if (releases.length === 0) {
         // No releases found, update repo status
@@ -52,25 +66,32 @@ class ReleaseService {
       }
 
       // Update repository metadata
-      const latestRelease = releases.find(r => !r.isPrerelease && !r.isDraft) || releases[0];
+      // GitHub "latest release" is the most recent non-draft, non-prerelease.
+      const latestStableRelease = releases.find(r => !r.isPrerelease && !r.isDraft) || null;
       const updateData = {
         hasReleases: true,
         releasesLastFetched: new Date()
       };
 
-          // Always update latest_version to the most recent
-    if (latestRelease) {
-      updateData.latestVersion = latestRelease.tagName;
+      if (latestStableRelease) {
+        updateData.latestVersion = latestStableRelease.tagName;
 
-      // Set currently_used_version to latest if not already set (for new repos)
-      if (!repo.currentlyUsedVersion) {
-        updateData.currentlyUsedVersion = latestRelease.tagName;
+        // Set currently_used_version to latest if not already set (for new repos)
+        if (!repo.currentlyUsedVersion) {
+          updateData.currentlyUsedVersion = latestStableRelease.tagName;
+        }
+
+        // Calculate if update is available
+        const currentVersion = repo.currentlyUsedVersion || latestStableRelease.tagName;
+        updateData.updateAvailable = currentVersion !== latestStableRelease.tagName;
+      } else {
+        // No stable "latest" exists per GitHub semantics (only pre-releases/drafts).
+        updateData.latestVersion = null;
+        updateData.updateAvailable = false;
+        if (!repo.currentlyUsedVersion) {
+          updateData.currentlyUsedVersion = null;
+        }
       }
-
-      // Calculate if update is available
-      const currentVersion = repo.currentlyUsedVersion || latestRelease.tagName;
-      updateData.updateAvailable = currentVersion !== latestRelease.tagName;
-    }
 
       await repo.update(updateData);
 
@@ -100,9 +121,13 @@ class ReleaseService {
       throw new Error('Repository not found');
     }
 
+    if (repo.UserId !== user.id) {
+      throw new Error('Repository not found or access denied');
+    }
+
     const shouldRefresh = forceRefresh || 
       !repo.releasesLastFetched || 
-      (Date.now() - repo.releasesLastFetched.getTime()) > 24 * 60 * 60 * 1000; // 24 hours
+      (Date.now() - repo.releasesLastFetched.getTime()) > DAY_MS; // 24 hours
 
     if (shouldRefresh) {
       await this.fetchAndStoreReleases(repoId, user);
@@ -182,49 +207,73 @@ class ReleaseService {
   /**
    * Bulk fetch releases for repositories that need updates
    * @param {number} userId - User ID
-   * @param {number} limit - Limit number of repos to process
+   * @param {number} limit - Limit number of repos to process (capped at MAX_BULK_FETCH_LIMIT)
    * @param {Array} repoIds - Optional array of specific repository IDs to fetch
+   * @param {Object} options - Optional behavior overrides
+   * @param {number} options.minFetchAgeMs - Only fetch if last fetch is older than this age (default 24h)
+   * @param {boolean} options.force - Fetch regardless of last fetched time
    * @returns {Promise<Object>} Processing results
    */
-  static async bulkFetchReleases(userId, limit = 20, repoIds = null) {
+  static async bulkFetchReleases(userId, limit = 20, repoIds = null, options = {}) {
     const user = await User.findByPk(userId);
     if (!user) {
       throw new Error('User not found');
     }
 
-    // Find repositories that need release updates
-    const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
-    
+    // Enforce maximum limit to prevent rate limit exhaustion
+    const effectiveLimit = Math.min(limit, MAX_BULK_FETCH_LIMIT);
+
+    const force = options.force === true;
+    const minFetchAgeMs = Number.isFinite(options.minFetchAgeMs) && options.minFetchAgeMs >= 0
+      ? options.minFetchAgeMs
+      : DAY_MS;
+
     const whereCondition = {
-      UserId: userId,
-      // Either never fetched releases or haven't been updated in 24 hours
-      [require('sequelize').Op.or]: [
-        { releasesLastFetched: null },
-        { releasesLastFetched: { [require('sequelize').Op.lt]: cutoffTime } }
-      ]
+      UserId: userId
     };
+
+    if (!force) {
+      // Either never fetched releases or haven't been updated within the configured window.
+      const cutoffTime = new Date(Date.now() - minFetchAgeMs);
+      whereCondition[Op.or] = [
+        { releasesLastFetched: null },
+        { releasesLastFetched: { [Op.lte]: cutoffTime } }
+      ];
+    }
 
     // If specific repo IDs are provided, filter to only those
     if (repoIds && repoIds.length > 0) {
-      whereCondition.id = { [require('sequelize').Op.in]: repoIds };
+      whereCondition.id = { [Op.in]: repoIds };
     }
 
     const repos = await Repo.findAll({
       where: whereCondition,
-      limit,
-      order: [['starredAt', 'DESC']] // Process most recently starred first
+      limit: effectiveLimit,
+      order: [['releasesLastFetched', 'ASC NULLS FIRST'], ['starredAt', 'DESC']] // Prioritize repos that haven't been fetched recently
     });
 
     const results = {
       processed: 0,
       successful: 0,
       failed: 0,
+      skippedRateLimit: 0,
       errors: []
     };
 
+    // Create a shared GitHubService instance to track rate limits across requests
+    const githubService = new GitHubService(user.accessToken);
+
     for (const repo of repos) {
+      // Check rate limit before each request - stop early if running low
+      if (githubService.rateLimitRemaining !== null && githubService.rateLimitRemaining < 50) {
+        console.log(`[release-service] Stopping bulk fetch early: rate limit low (${githubService.rateLimitRemaining} remaining)`);
+        results.skippedRateLimit = repos.length - results.processed;
+        break;
+      }
+
+      let stopForRateLimit = false;
       try {
-        await this.fetchAndStoreReleases(repo.id, user);
+        await this.fetchAndStoreReleases(repo.id, user, githubService);
         results.successful++;
       } catch (error) {
         results.failed++;
@@ -233,8 +282,31 @@ class ReleaseService {
           repoName: repo.fullName,
           error: error.message
         });
+
+        // If we hit a rate limit error, stop processing
+        // GitHub returns 403 with specific headers/messages for rate limits, vs other 403s for permissions
+        const isRateLimitError =
+          error.status === 403 && (
+            error.message?.toLowerCase().includes('rate limit') ||
+            error.response?.headers?.['x-ratelimit-remaining'] === '0'
+          );
+        if (isRateLimitError) {
+          console.log(`[release-service] Stopping bulk fetch: rate limit hit`);
+          stopForRateLimit = true;
+        }
+      } finally {
+        results.processed++;
       }
-      results.processed++;
+
+      if (stopForRateLimit) {
+        results.skippedRateLimit = repos.length - results.processed;
+        break;
+      }
+
+      // Add delay between repos to avoid rate limiting
+      if (results.processed < repos.length) {
+        await delay(BULK_FETCH_DELAY_MS);
+      }
     }
 
     return results;
