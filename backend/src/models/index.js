@@ -85,6 +85,11 @@ const Repo = sequelize.define('Repo', {
     type: DataTypes.DATE,
     field: 'github_updated_at'
   },
+  isFollowed: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    field: 'is_followed'
+  },
   // Release tracking fields
   latestVersion: {
     type: DataTypes.STRING,

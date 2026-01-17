@@ -46,10 +46,12 @@ class ReleaseService {
       // Store releases in database
       const storedReleases = [];
       for (const releaseData of releases) {
+        // Use githubReleaseId as unique key - it's GitHub's stable identifier.
+        // Using tagName would cause phantom rows if a release is retagged.
         const [release, created] = await Release.findOrCreate({
-          where: { 
-            repoId: repo.id, 
-            githubReleaseId: releaseData.githubReleaseId 
+          where: {
+            repoId: repo.id,
+            githubReleaseId: releaseData.githubReleaseId
           },
           defaults: {
             ...releaseData,
@@ -57,7 +59,7 @@ class ReleaseService {
           }
         });
 
-        // Update existing release if not created
+        // Update existing release if not created (handles tag renames, content changes)
         if (!created) {
           await release.update(releaseData);
         }
@@ -76,14 +78,17 @@ class ReleaseService {
       if (latestStableRelease) {
         updateData.latestVersion = latestStableRelease.tagName;
 
-        // Set currently_used_version to latest if not already set (for new repos)
-        if (!repo.currentlyUsedVersion) {
+        // Set currently_used_version to latest only on FIRST successful fetch with releases
+        // Use hasReleases (not releasesLastFetched) since releasesLastFetched is set on errors too
+        if (!repo.currentlyUsedVersion && !repo.hasReleases) {
           updateData.currentlyUsedVersion = latestStableRelease.tagName;
         }
 
-        // Calculate if update is available
-        const currentVersion = repo.currentlyUsedVersion || latestStableRelease.tagName;
-        updateData.updateAvailable = currentVersion !== latestStableRelease.tagName;
+        // Calculate if update is available (null means "not using", so no update)
+        const currentVersion = repo.currentlyUsedVersion || updateData.currentlyUsedVersion;
+        updateData.updateAvailable = currentVersion
+          ? currentVersion !== latestStableRelease.tagName
+          : false;
       } else {
         // No stable "latest" exists per GitHub semantics (only pre-releases/drafts).
         updateData.latestVersion = null;
@@ -144,7 +149,7 @@ class ReleaseService {
    * Update user's currently used version for a repository
    * @param {number} repoId - Internal repository ID
    * @param {number} userId - User ID
-   * @param {string|null} currentlyUsedVersion - Currently used version tag or null for latest
+   * @param {string|null} currentlyUsedVersion - Version tag, or null/empty for "Not using"
    * @returns {Promise<Object>} Updated repository
    */
   static async updateCurrentlyUsedVersion(repoId, userId, currentlyUsedVersion) {
@@ -170,11 +175,10 @@ class ReleaseService {
       }
     }
 
-    // If null/empty, use the latest version
-    if (!currentlyUsedVersion) {
-      currentlyUsedVersion = repo.latestVersion;
-    } else {
-      // Validate that the selected version exists if provided
+    // If null/empty is explicitly passed, allow it (user chose "Not using")
+    // Only validate if a specific version is provided
+    if (currentlyUsedVersion) {
+      // Validate that the selected version exists
       const release = await Release.findOne({
         where: { repoId, tagName: currentlyUsedVersion }
       });
@@ -184,8 +188,10 @@ class ReleaseService {
       }
     }
     
-    // Calculate if update is available
-    const updateAvailable = currentlyUsedVersion !== repo.latestVersion;
+    // Calculate if update is available (null means "not using", so no update available)
+    const updateAvailable = currentlyUsedVersion
+      ? currentlyUsedVersion !== repo.latestVersion
+      : false;
     
     await repo.update({ currentlyUsedVersion, updateAvailable });
     
@@ -201,6 +207,12 @@ class ReleaseService {
    * @returns {string|null} Effective version tag
    */
   static getEffectiveVersion(repo) {
+    // If releases have been fetched, respect the user's explicit choice
+    // (null means "Not using" - don't fall back to latestVersion)
+    if (repo.hasReleases) {
+      return repo.currentlyUsedVersion || null;
+    }
+    // Releases not yet fetched - fall back to latestVersion as best guess
     return repo.currentlyUsedVersion || repo.latestVersion || null;
   }
 

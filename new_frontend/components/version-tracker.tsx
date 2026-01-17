@@ -155,18 +155,30 @@ export function VersionTracker({ repository, onVersionUpdate, onRepositoryMetaUp
     // If current is NOT latest stable, show ALL versions from current to latest stable
     const currentRelease = releases[currentIndex]
     const latestStableRelease = releases[latestStableIndex]
-    
-    // Initial: ALL versions from current to latest stable (inclusive) - REVERSED to show current first
-    const currentToLatest = releases.slice(latestStableIndex, currentIndex + 1).reverse() // From current to latest (inclusive)
-    
-    // More: newer than latest stable + older than current (separated for staged reveal)
-    const newerThanLatestStable = releases.slice(0, latestStableIndex) // Everything newer than latest stable
-    const olderThanCurrent = releases.slice(currentIndex + 1) // Everything older than current
-    
-    return { 
-      initialDisplay: currentToLatest, 
-      newerVersions: newerThanLatestStable,
-      olderVersions: olderThanCurrent
+
+    // Handle both cases: current older than latest (normal) or current newer than latest (prerelease)
+    let currentToLatest: Release[]
+    let newerThanRange: Release[]
+    let olderThanRange: Release[]
+
+    if (currentIndex > latestStableIndex) {
+      // Current is OLDER than latest stable (normal case)
+      // Releases are newest-first, so slice from latestStable to current, then reverse for display
+      currentToLatest = releases.slice(latestStableIndex, currentIndex + 1).reverse()
+      newerThanRange = releases.slice(0, latestStableIndex) // Everything newer than latest stable
+      olderThanRange = releases.slice(currentIndex + 1) // Everything older than current
+    } else {
+      // Current is NEWER than latest stable (prerelease case)
+      // Releases are newest-first, so slice from current to latestStable (already in display order)
+      currentToLatest = releases.slice(currentIndex, latestStableIndex + 1)
+      newerThanRange = releases.slice(0, currentIndex) // Everything newer than current
+      olderThanRange = releases.slice(latestStableIndex + 1) // Everything older than latest stable
+    }
+
+    return {
+      initialDisplay: currentToLatest,
+      newerVersions: newerThanRange,
+      olderVersions: olderThanRange
     }
   }
 
