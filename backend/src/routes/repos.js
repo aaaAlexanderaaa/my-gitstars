@@ -4,11 +4,23 @@ const { Repo, Release } = require('../models');
 const { ensureAuth } = require('../middleware/auth');
 const ReleaseService = require('../services/releaseService');
 const axios = require('axios');
+const { getProxyConfig } = require('../config/proxy');
+
+// Shared outbound proxy agent + axios defaults (no-op when no proxy is configured).
+const proxyAgent = getProxyConfig();
+if (proxyAgent) {
+  // Disable axios' built-in proxy handling and route HTTPS via our agent instead;
+  // its native proxy option has known issues with TLS targets.
+  axios.defaults.httpsAgent = proxyAgent;
+  axios.defaults.proxy = false;
+}
 
 const router = express.Router();
 
 const README_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const README_CACHE_MAX_SIZE = 1000; // Maximum number of cached READMEs
+const ALLOWED_REPO_SORTS = new Set(['starredAt', 'stargazersCount', 'name']);
+const ALLOWED_SORT_ORDERS = new Set(['asc', 'desc']);
 
 /**
  * Simple LRU cache implementation for README content.
@@ -77,18 +89,25 @@ const readmeCache = new LRUCache(README_CACHE_MAX_SIZE, README_CACHE_TTL_MS);
 // Get repos with pagination
 router.get('/repos', ensureAuth, async (req, res) => {
   try {
-    const { 
-      tags, 
+    const {
+      tags,
       sort = 'starredAt',
       order = 'desc'
     } = req.query;
+
+    const normalizedSort = ALLOWED_REPO_SORTS.has(sort) ? sort : 'starredAt';
+    const normalizedOrder = typeof order === 'string' && ALLOWED_SORT_ORDERS.has(order.toLowerCase())
+      ? order.toUpperCase()
+      : 'DESC';
     
     let where = { UserId: req.user.id };
     // Parse tags query parameter
-    const tagFilters = tags ? tags.split(',') : [];
-    
+    const tagFilters = typeof tags === 'string' && tags
+      ? tags.split(',').map(tag => tag.trim()).filter(Boolean)
+      : [];
+
     // Build where clause based on filters
-    if (tags) {
+    if (tagFilters.length > 0) {
       where[Sequelize.Op.or] = [
         // Match custom tags
         { customTags: { [Sequelize.Op.overlap]: tagFilters } },
@@ -101,7 +120,7 @@ router.get('/repos', ensureAuth, async (req, res) => {
     
     const repos = await Repo.findAll({
       where,
-      order: [[sort, order.toUpperCase()]],
+      order: [[normalizedSort, normalizedOrder]],
       include: [{
         model: Release,
         required: false,

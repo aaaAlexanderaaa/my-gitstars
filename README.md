@@ -73,6 +73,11 @@ docker compose up --build
 - Backend development server: `cd backend && npm run dev`
 - Database migrations: `cd backend && npm run migrate`
 
+When running the frontend and backend as separate development servers, set
+`APP_URL=http://localhost:3000` for the backend so GitHub OAuth returns to the
+Next.js dev server. During `npm run dev`, the frontend proxies `/auth/*` and
+`/api/*` to the backend on `http://localhost:4000`.
+
 ## Contributing
 
 1. Fork the repository

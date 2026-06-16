@@ -1,4 +1,6 @@
-require('dotenv').config();
+const { loadEnv } = require('./env');
+
+loadEnv();
 
 /**
  * Helper to find the first defined environment variable from a list of keys.

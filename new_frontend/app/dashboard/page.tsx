@@ -76,6 +76,8 @@ interface AdvancedFilter {
   expression: string
 }
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
 const mockUser: User = {
   id: 1,
   githubId: "123456",
@@ -1521,7 +1523,7 @@ const RepositoryGrid: React.FC<RepositoryGridProps> = ({ repositories, handleRep
                                   .slice(0, 8)
                                   .map((suggestion) => {
                                     const input = (newTagInputs[repo.id] || "").toLowerCase().trim()
-                                    const parts = suggestion.split(new RegExp(`(${input})`, "gi"))
+                                    const parts = suggestion.split(new RegExp(`(${escapeRegExp(input)})`, "gi"))
                                     const globalCount = globalTagCounts.get(suggestion) || 0
 
                                     return (

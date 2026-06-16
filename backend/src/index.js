@@ -1,4 +1,5 @@
-require('dotenv').config();
+const { loadEnv, requireEnv } = require('./config/env');
+loadEnv();
 const express = require('express');
 const passport = require('passport');
 const session = require('express-session');
@@ -10,6 +11,12 @@ const { startSchedulers } = require('./services/schedulerService');
 
 const app = express();
 const port = process.env.PORT || 4000;
+
+requireEnv(['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'SESSION_SECRET']);
+// APP_URL defaults to the local server so existing deployments without it keep working.
+if (!process.env.APP_URL) {
+  process.env.APP_URL = `http://localhost:${port}`;
+}
 
 // Trust first proxy for secure cookies
 app.set('trust proxy', 1);

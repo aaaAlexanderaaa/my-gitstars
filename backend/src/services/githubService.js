@@ -1,4 +1,5 @@
 const { Octokit } = require('@octokit/rest');
+const { getProxyConfig } = require('../config/proxy');
 
 // Configuration for API requests
 const API_TIMEOUT_MS = 30000; // 30 seconds (increased from 5s)
@@ -10,13 +11,17 @@ const RATE_LIMIT_BUFFER = 100; // Stop when remaining requests fall below this
 // Helper to delay execution
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Shared outbound proxy agent (null when no proxy is configured).
+const proxyAgent = getProxyConfig();
+
 class GitHubService {
   constructor(accessToken) {
     this.octokit = new Octokit({
       auth: accessToken,
       baseUrl: 'https://api.github.com',
       request: {
-        timeout: API_TIMEOUT_MS
+        timeout: API_TIMEOUT_MS,
+        ...(proxyAgent ? { agent: proxyAgent } : {})
       }
     });
     this.rateLimitRemaining = null;

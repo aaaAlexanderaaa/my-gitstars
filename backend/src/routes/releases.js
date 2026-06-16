@@ -3,6 +3,11 @@ const ReleaseService = require('../services/releaseService');
 const { Repo } = require('../models');
 const router = express.Router();
 
+function parseRepoId(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && String(parsed) === String(value) ? parsed : null;
+}
+
 // Middleware to ensure user is authenticated
 const requireAuth = (req, res, next) => {
   if (!req.user) {
@@ -16,9 +21,16 @@ router.get('/repo/:repoId', requireAuth, async (req, res) => {
   try {
     const { repoId } = req.params;
     const { refresh } = req.query;
+    const parsedRepoId = parseRepoId(repoId);
+    if (parsedRepoId === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid repository ID'
+      });
+    }
 
     const repo = await Repo.findOne({
-      where: { id: parseInt(repoId), UserId: req.user.id }
+      where: { id: parsedRepoId, UserId: req.user.id }
     });
 
     if (!repo) {
@@ -27,10 +39,10 @@ router.get('/repo/:repoId', requireAuth, async (req, res) => {
         error: 'Repository not found'
       });
     }
-    
+
     const releases = await ReleaseService.getRepositoryReleases(
       repo.id,
-      req.user, 
+      req.user,
       refresh === 'true'
     );
 
@@ -62,10 +74,17 @@ router.get('/repo/:repoId/newer-versions', requireAuth, async (req, res) => {
   try {
     const { repoId } = req.params;
     const { Repo, Release } = require('../models');
-    
+    const parsedRepoId = parseRepoId(repoId);
+    if (parsedRepoId === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid repository ID'
+      });
+    }
+
     // Get the repository with current version info
     const repo = await Repo.findOne({
-      where: { id: parseInt(repoId), UserId: req.user.id }
+      where: { id: parsedRepoId, UserId: req.user.id }
     });
 
     if (!repo) {
@@ -84,7 +103,7 @@ router.get('/repo/:repoId/newer-versions', requireAuth, async (req, res) => {
 
     // Get all releases for this repo
     const allReleases = await Release.findAll({
-      where: { repoId: parseInt(repoId) },
+      where: { repoId: parsedRepoId },
       order: [['publishedAt', 'ASC']], // Oldest first for proper ordering
       attributes: ['id', 'tagName', 'name', 'body', 'publishedAt', 'isPrerelease', 'isDraft']
     });
@@ -95,7 +114,7 @@ router.get('/repo/:repoId/newer-versions', requireAuth, async (req, res) => {
     );
 
     // Get releases newer than the current version (chronologically later)
-    const newerReleases = currentVersionIndex >= 0 
+    const newerReleases = currentVersionIndex >= 0
       ? allReleases.slice(currentVersionIndex + 1)
       : allReleases; // If current version not found, show all releases
 
@@ -120,10 +139,17 @@ router.patch('/repo/:repoId/version', requireAuth, async (req, res) => {
     // Accept both field names for backward compatibility
     const { currentlyUsedVersion, selectedVersion } = req.body;
     const versionToUse = currentlyUsedVersion || selectedVersion;
+    const parsedRepoId = parseRepoId(repoId);
+    if (parsedRepoId === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid repository ID'
+      });
+    }
 
     const repo = await ReleaseService.updateCurrentlyUsedVersion(
-      parseInt(repoId), 
-      req.user.id, 
+      parsedRepoId,
+      req.user.id,
       versionToUse || null
     );
 
@@ -150,8 +176,28 @@ router.patch('/repo/:repoId/version', requireAuth, async (req, res) => {
 router.post('/bulk-fetch', requireAuth, async (req, res) => {
   try {
     const { limit = 20, repoIds = null } = req.body;
-    
-    const results = await ReleaseService.bulkFetchReleases(req.user.id, limit, repoIds);
+    const parsedLimit = Number.parseInt(limit, 10);
+    const safeLimit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20;
+
+    let safeRepoIds = null;
+    if (repoIds !== null && repoIds !== undefined) {
+      if (!Array.isArray(repoIds)) {
+        return res.status(400).json({
+          success: false,
+          error: 'repoIds must be an array'
+        });
+      }
+
+      safeRepoIds = repoIds.map(parseRepoId);
+      if (safeRepoIds.some(id => id === null)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid repository ID'
+        });
+      }
+    }
+
+    const results = await ReleaseService.bulkFetchReleases(req.user.id, safeLimit, safeRepoIds);
 
     res.json({
       success: true,
@@ -166,4 +212,4 @@ router.post('/bulk-fetch', requireAuth, async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;

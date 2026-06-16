@@ -97,4 +97,4 @@ module.exports = {
     // Drop Releases table
     await queryInterface.dropTable('Releases');
   }
-}; 
+};

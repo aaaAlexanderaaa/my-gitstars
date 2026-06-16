@@ -253,8 +253,9 @@ class ReleaseService {
       ];
     }
 
-    // If specific repo IDs are provided, filter to only those
-    if (repoIds && repoIds.length > 0) {
+    // If specific repo IDs are provided, filter to only those. An explicit empty
+    // list should match no repos instead of falling back to an unscoped fetch.
+    if (Array.isArray(repoIds)) {
       whereCondition.id = { [Op.in]: repoIds };
     }
 
