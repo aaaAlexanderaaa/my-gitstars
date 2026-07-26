@@ -1,17 +1,32 @@
 "use client"
 
 import type React from "react"
-import { useState, useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { Filter, Search, X, Tag, Code, Hash, ChevronDown, ChevronUp, Play } from "lucide-react"
+import {
+  ChevronDown,
+  ChevronUp,
+  Code,
+  Filter,
+  Hash,
+  Pencil,
+  Play,
+  Search,
+  Tag,
+  Trash2,
+  X,
+} from "lucide-react"
+import type { Repository } from "@/lib/types"
+
+type TagKind = "language" | "topic" | "custom"
 
 interface TagCount {
   tag: string
   count: number
-  type: "language" | "topic" | "custom"
+  kind: TagKind
 }
 
 interface AdvancedFilter {
@@ -20,190 +35,203 @@ interface AdvancedFilter {
 }
 
 interface TagFilterPanelProps {
-  repositories: any[]
-  allRepositories: any[]
+  repositories: Repository[]
+  allRepositories: Repository[]
   selectedTags: string[]
+  customTags: string[]
   onTagToggle: (tag: string) => void
   onClearFilters: () => void
   activeAdvancedFilters: AdvancedFilter[]
   onAddAdvancedFilter: (expression: string) => void
   onRemoveAdvancedFilter: (filterId: string) => void
+  onRenameTag: (from: string, to: string) => Promise<void>
+  onDeleteTag: (tag: string) => Promise<void>
 }
 
-class TagCalculator {
-  static calculateFromRepositories(repositories: any[]): TagCount[] {
-    const tagCountMap = new Map<string, { count: number; type: "language" | "topic" | "custom" }>()
+const COLLAPSED_LIMIT = 10
 
-    repositories.forEach((repo) => {
-      // Language tags
-      if (repo.language) {
-        const existing = tagCountMap.get(repo.language) || { count: 0, type: "language" as const }
-        tagCountMap.set(repo.language, { ...existing, count: existing.count + 1 })
-      }
+/**
+ * Counts are keyed by lowercased tag while the label keeps the first spelling seen.
+ * Filtering is case-insensitive, so counting case-sensitively used to make the badge
+ * numbers disagree with the number of results.
+ */
+function calculateTagCounts(repositories: Repository[]): TagCount[] {
+  const entries = new Map<string, { label: string; kind: TagKind; count: number }>()
 
-      // Topic tags
-      repo.topics?.forEach((topic: string) => {
-        const existing = tagCountMap.get(topic) || { count: 0, type: "topic" as const }
-        tagCountMap.set(topic, { ...existing, count: existing.count + 1 })
-      })
-
-      // Custom tags
-      repo.customTags?.forEach((tag: string) => {
-        const existing = tagCountMap.get(tag) || { count: 0, type: "custom" as const }
-        tagCountMap.set(tag, { ...existing, count: existing.count + 1 })
-      })
-    })
-
-    return Array.from(tagCountMap.entries())
-      .map(([tag, { count, type }]) => ({ tag, count, type }))
-      .sort((a, b) => b.count - a.count) // Sort by count descending
-  }
-
-  static categorizeAndLimit(tagCounts: TagCount[], searchQuery: string, limits: { [key: string]: number }) {
-    const filtered = tagCounts.filter((item) => item.tag.toLowerCase().includes(searchQuery.toLowerCase()))
-
-    const languages = filtered.filter((item) => item.type === "language").slice(0, limits.languages || 10)
-    const topics = filtered.filter((item) => item.type === "topic").slice(0, limits.topics || 10)
-    const custom = filtered.filter((item) => item.type === "custom").slice(0, limits.custom || 10)
-
-    const totalLanguages = Array.from(
-      new Set(filtered.filter((item) => item.type === "language").map((item) => item.tag)),
-    ).length
-    const totalTopics = Array.from(
-      new Set(filtered.filter((item) => item.type === "topic").map((item) => item.tag)),
-    ).length
-    const totalCustom = Array.from(
-      new Set(filtered.filter((item) => item.type === "custom").map((item) => item.tag)),
-    ).length
-
-    return {
-      languages,
-      topics,
-      custom,
-      totals: {
-        languages: totalLanguages,
-        topics: totalTopics,
-        custom: totalCustom,
-      },
+  const bump = (raw: string, kind: TagKind) => {
+    const key = `${kind}:${raw.toLowerCase()}`
+    const existing = entries.get(key)
+    if (existing) {
+      existing.count += 1
+    } else {
+      entries.set(key, { label: raw, kind, count: 1 })
     }
   }
+
+  for (const repo of repositories) {
+    if (repo.language) bump(repo.language, "language")
+    for (const tag of repo.customTags || []) bump(tag, "custom")
+    for (const topic of repo.topics || []) bump(topic, "topic")
+  }
+
+  return Array.from(entries.values())
+    .map(({ label, kind, count }) => ({ tag: label, kind, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
 }
 
 export function TagFilterPanel({
   repositories,
   allRepositories,
   selectedTags,
+  customTags,
   onTagToggle,
   onClearFilters,
   activeAdvancedFilters,
   onAddAdvancedFilter,
   onRemoveAdvancedFilter,
+  onRenameTag,
+  onDeleteTag,
 }: TagFilterPanelProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [advancedFilterInput, setAdvancedFilterInput] = useState("")
-  const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({
-    languages: false,
-    topics: false,
-    custom: false,
-  })
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [managingTags, setManagingTags] = useState(false)
+  const [busyTag, setBusyTag] = useState<string | null>(null)
 
-  const handleApplyAdvancedFilter = () => {
-    if (advancedFilterInput.trim()) {
-      onAddAdvancedFilter(advancedFilterInput.trim())
-      setAdvancedFilterInput("")
+  const tagCounts = useMemo(() => calculateTagCounts(repositories), [repositories])
+
+  const categories = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    const matching = query ? tagCounts.filter((item) => item.tag.toLowerCase().includes(query)) : tagCounts
+
+    const pick = (kind: TagKind) => {
+      const all = matching.filter((item) => item.kind === kind)
+      return { all, visible: expanded[kind] ? all : all.slice(0, COLLAPSED_LIMIT) }
+    }
+
+    return { custom: pick("custom"), language: pick("language"), topic: pick("topic") }
+  }, [tagCounts, searchQuery, expanded])
+
+  const selectedLower = useMemo(
+    () => new Set(selectedTags.map((tag) => tag.toLowerCase())),
+    [selectedTags],
+  )
+
+  const applyAdvancedFilter = () => {
+    if (!advancedFilterInput.trim()) return
+    onAddAdvancedFilter(advancedFilterInput)
+    setAdvancedFilterInput("")
+  }
+
+  const handleRename = async (tag: string) => {
+    const next = window.prompt(`Rename "${tag}" across all repositories to:`, tag)
+    if (!next || next.trim() === tag) return
+    setBusyTag(tag)
+    try {
+      await onRenameTag(tag, next.trim())
+    } finally {
+      setBusyTag(null)
     }
   }
 
-  const handleAdvancedFilterKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleApplyAdvancedFilter()
+  const handleDelete = async (tag: string) => {
+    const affected = allRepositories.filter((repo) => repo.customTags.includes(tag)).length
+    if (!window.confirm(`Remove "${tag}" from ${affected} repositories?`)) return
+    setBusyTag(tag)
+    try {
+      await onDeleteTag(tag)
+    } finally {
+      setBusyTag(null)
     }
   }
 
-  const { languages, topics, custom, totals } = useMemo(() => {
-    console.log("[TagFilterPanel] Recalculating tags for", repositories.length, "repositories (filtered)")
-    // Use filtered repositories for tag counts to show dynamic counts based on current filters
-    const tagCounts = repositories.length > 0 ? TagCalculator.calculateFromRepositories(repositories) : []
-    console.log("[TagFilterPanel] Calculated", tagCounts.length, "tag counts")
-
-    const limits = {
-      languages: expandedSections.languages ? 1000 : 10,
-      topics: expandedSections.topics ? 1000 : 10,
-      custom: expandedSections.custom ? 1000 : 10,
-    }
-
-    const result = TagCalculator.categorizeAndLimit(tagCounts, searchQuery, limits)
-
-    return {
-      languages: result.languages,
-      topics: result.topics,
-      custom: result.custom,
-      totals: result.totals,
-    }
-  }, [repositories, searchQuery, expandedSections, repositories.map(r => r.customTags).flat().join(',')])
-
-  const toggleSection = (section: string) => {
-    setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }))
-  }
-
-  const renderTagCategory = (
+  const renderCategory = (
     title: string,
-    tags: TagCount[],
+    kind: TagKind,
     icon: React.ReactNode,
-    sectionKey: string,
-    totalCount: number,
+    group: { all: TagCount[]; visible: TagCount[] },
   ) => {
-    if (totalCount === 0) return null
-
-    const isExpanded = expandedSections[sectionKey]
-    const hasMore = totalCount > 10 // Always check if there are more than 10 items total
+    if (group.all.length === 0) return null
+    const isExpanded = !!expanded[kind]
 
     return (
       <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-            {icon}
-            <span>{title}</span>
-            <Badge variant="outline" className="text-xs bg-muted border-gray-200 text-gray-600">
-              {totalCount}
-            </Badge>
-          </div>
+        <div className="flex items-center gap-2 text-sm font-medium">
+          {icon}
+          <span>{title}</span>
+          <Badge variant="outline" className="text-xs">
+            {group.all.length}
+          </Badge>
         </div>
 
-        <div className="space-y-0">
-          {tags.map(({ tag, count }) => (
-            <button
-              key={tag}
-              onClick={() => onTagToggle(tag)}
-              className={`w-full text-left px-3 py-1 rounded-md text-sm transition-all hover:bg-accent border border-gray-100 ${
-                selectedTags.includes(tag) ? "bg-primary/10 text-primary border-primary/20" : "hover:bg-accent"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="truncate font-normal text-gray-700">{tag}</span>
-                <Badge variant="outline" className="text-xs bg-muted/50 border-gray-200 text-gray-500">
-                  {count}
-                </Badge>
-              </div>
-            </button>
-          ))}
+        <div>
+          {group.visible.map(({ tag, count }) => {
+            const isSelected = selectedLower.has(tag.toLowerCase())
+            return (
+              <div
+                key={`${kind}-${tag}`}
+                className={`group flex items-center gap-1 rounded-md px-1 transition-colors ${
+                  isSelected ? "bg-primary/10" : "hover:bg-accent"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => onTagToggle(tag)}
+                  aria-pressed={isSelected}
+                  className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2 py-1 text-left text-sm"
+                >
+                  <span className={`truncate ${isSelected ? "font-medium text-primary" : "text-foreground"}`}>
+                    {tag}
+                  </span>
+                  <Badge variant="outline" className="shrink-0 text-xs text-muted-foreground">
+                    {count}
+                  </Badge>
+                </button>
 
-          {hasMore && (
+                {managingTags && kind === "custom" && (
+                  <span className="flex shrink-0 items-center">
+                    <button
+                      type="button"
+                      onClick={() => handleRename(tag)}
+                      disabled={busyTag === tag}
+                      title={`Rename "${tag}" everywhere`}
+                      aria-label={`Rename tag ${tag}`}
+                      className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(tag)}
+                      disabled={busyTag === tag}
+                      title={`Remove "${tag}" everywhere`}
+                      aria-label={`Delete tag ${tag}`}
+                      className="rounded p-1 text-muted-foreground hover:bg-destructive/20 hover:text-destructive disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </span>
+                )}
+              </div>
+            )
+          })}
+
+          {group.all.length > COLLAPSED_LIMIT && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => toggleSection(sectionKey)}
+              onClick={() => setExpanded((prev) => ({ ...prev, [kind]: !prev[kind] }))}
               className="w-full justify-center text-xs text-muted-foreground hover:text-foreground"
             >
               {isExpanded ? (
                 <>
-                  <ChevronUp className="h-3 w-3 mr-1" />
+                  <ChevronUp className="mr-1 h-3 w-3" />
                   Show less
                 </>
               ) : (
                 <>
-                  <ChevronDown className="h-3 w-3 mr-1" />
-                  Show more
+                  <ChevronDown className="mr-1 h-3 w-3" />
+                  Show all {group.all.length}
                 </>
               )}
             </Button>
@@ -213,18 +241,19 @@ export function TagFilterPanel({
     )
   }
 
-  return (
-    <div className="w-64 shrink-0 border-r border-gray-200 bg-card overflow-hidden flex flex-col">
+  const hasActiveFilters = selectedTags.length > 0 || activeAdvancedFilters.length > 0
 
-      <div className="p-4 border-b border-gray-200">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold flex items-center gap-2">
+  return (
+    <aside className="flex w-full shrink-0 flex-col overflow-hidden border-b border-border bg-card md:w-64 md:border-b-0 md:border-r">
+      <div className="border-b border-border p-4">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 font-semibold">
             <Filter className="h-4 w-4" />
             Filters
-          </h3>
-          {(selectedTags.length > 0 || activeAdvancedFilters.length > 0) && (
+          </h2>
+          {hasActiveFilters && (
             <Button variant="ghost" size="sm" onClick={onClearFilters} className="h-7 px-2 text-xs">
-              Clear All
+              Clear all
             </Button>
           )}
         </div>
@@ -232,96 +261,95 @@ export function TagFilterPanel({
         <div className="space-y-2">
           <div className="flex gap-1">
             <Input
-              placeholder="Advanced: (react OR vue) AND typescript"
+              placeholder='(react OR vue) AND NOT deprecated'
               value={advancedFilterInput}
-              onChange={(e) => setAdvancedFilterInput(e.target.value)}
-              onKeyDown={handleAdvancedFilterKeyDown}
-              className="text-xs h-8 flex-1 border-gray-200"
+              onChange={(event) => setAdvancedFilterInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") applyAdvancedFilter()
+              }}
+              className="h-8 flex-1 text-xs"
+              aria-label="Advanced filter expression"
             />
             <Button
               variant="outline"
               size="sm"
-              onClick={handleApplyAdvancedFilter}
+              onClick={applyAdvancedFilter}
               disabled={!advancedFilterInput.trim()}
-              className="h-8 px-2 bg-transparent border-gray-200 text-gray-600 hover:bg-gray-50"
+              className="h-8 px-2"
+              aria-label="Apply advanced filter"
             >
               <Play className="h-3 w-3" />
             </Button>
           </div>
-          <div className="text-xs text-muted-foreground">
-            Use: AND, OR, NOT, parentheses. Press Enter or click apply.
-          </div>
+          <p className="text-xs text-muted-foreground">
+            AND, OR, NOT and parentheses. Quote tags containing spaces.
+          </p>
         </div>
       </div>
 
-      {(selectedTags.length > 0 || activeAdvancedFilters.length > 0) && (
-        <div className="p-4 border-b border-gray-200 bg-muted/20">
-          <div className="text-xs text-muted-foreground mb-2">Active filters:</div>
-          <div className="space-y-2">
-            {selectedTags.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {selectedTags.map((tag) => (
-                  <Badge
-                    key={tag}
-                    className="text-xs cursor-pointer bg-primary/10 text-primary hover:bg-accent hover:text-accent-foreground transition-colors"
-                    onClick={() => onTagToggle(tag)}
-                  >
-                    {tag}
-                    <X className="h-3 w-3 ml-1" />
-                  </Badge>
-                ))}
-              </div>
-            )}
-            {activeAdvancedFilters.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {activeAdvancedFilters.map((filter) => (
-                  <Badge
-                    key={filter.id}
-                    className="text-xs cursor-pointer bg-accent/80 text-accent-foreground hover:bg-accent hover:text-accent-foreground/80 transition-colors"
-                    onClick={() => onRemoveAdvancedFilter(filter.id)}
-                  >
-                    <Code className="h-3 w-3 mr-1" />
-                    {filter.expression}
-                    <X className="h-3 w-3 ml-1" />
-                  </Badge>
-                ))}
-              </div>
-            )}
+      {hasActiveFilters && (
+        <div className="border-b border-border bg-muted/40 p-4">
+          <div className="mb-2 text-xs text-muted-foreground">Active filters</div>
+          <div className="flex flex-wrap gap-1">
+            {selectedTags.map((tag) => (
+              <button key={tag} type="button" onClick={() => onTagToggle(tag)}>
+                <Badge className="cursor-pointer bg-primary/10 text-xs text-primary hover:bg-accent hover:text-accent-foreground">
+                  {tag}
+                  <X className="ml-1 h-3 w-3" />
+                </Badge>
+              </button>
+            ))}
+            {activeAdvancedFilters.map((filter) => (
+              <button key={filter.id} type="button" onClick={() => onRemoveAdvancedFilter(filter.id)}>
+                <Badge className="cursor-pointer bg-accent text-xs text-accent-foreground hover:bg-accent/80">
+                  <Code className="mr-1 h-3 w-3" />
+                  {filter.expression}
+                  <X className="ml-1 h-3 w-3" />
+                </Badge>
+              </button>
+            ))}
           </div>
         </div>
       )}
 
-      <div className="p-4 border-b border-gray-200">
+      <div className="border-b border-border p-4">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search tags..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-8 text-xs border-gray-200"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="h-8 pl-8 text-xs"
+            aria-label="Search tags"
           />
         </div>
+        {customTags.length > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setManagingTags((prev) => !prev)}
+            className="mt-2 h-7 w-full justify-center text-xs text-muted-foreground hover:text-foreground"
+            aria-pressed={managingTags}
+          >
+            <Pencil className="mr-1 h-3 w-3" />
+            {managingTags ? "Done managing tags" : "Manage custom tags"}
+          </Button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="p-4 space-y-3">
-          {renderTagCategory("Custom Tags", custom, <Tag className="h-4 w-4 text-blue-600" />, "custom", totals.custom)}
-
-          {custom.length > 0 && languages.length > 0 && <Separator />}
-
-          {renderTagCategory(
-            "Languages",
-            languages,
-            <Code className="h-4 w-4 text-green-600" />,
-            "languages",
-            totals.languages,
+        <div className="space-y-3 p-4">
+          {renderCategory("Custom tags", "custom", <Tag className="h-4 w-4 text-primary" />, categories.custom)}
+          {categories.custom.all.length > 0 && categories.language.all.length > 0 && <Separator />}
+          {renderCategory("Languages", "language", <Code className="h-4 w-4 text-primary" />, categories.language)}
+          {(categories.custom.all.length > 0 || categories.language.all.length > 0) &&
+            categories.topic.all.length > 0 && <Separator />}
+          {renderCategory("Topics", "topic", <Hash className="h-4 w-4 text-primary" />, categories.topic)}
+          {tagCounts.length === 0 && (
+            <p className="text-xs text-muted-foreground">No tags to show for the current results.</p>
           )}
-
-          {(custom.length > 0 || languages.length > 0) && topics.length > 0 && <Separator />}
-
-          {renderTagCategory("Topics", topics, <Hash className="h-4 w-4 text-purple-600" />, "topics", totals.topics)}
         </div>
       </div>
-    </div>
+    </aside>
   )
 }

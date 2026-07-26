@@ -1,402 +1,289 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { VersionTracker } from "@/components/version-tracker"
-import { RefreshCw, AlertTriangle, BookOpen } from "lucide-react"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
-import rehypeRaw from "rehype-raw"
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
-
-interface Repository {
-  id: number
-  githubId: number
-  name: string
-  owner: string
-  description: string
-  language: string
-  stargazersCount: number
-  topics: string[]
-  customTags: string[]
-  starredAt: string
-  isFollowed: boolean
-  latestVersion?: string
-  currentlyUsedVersion?: string
-  updateAvailable?: boolean
-}
+import { Markdown } from "@/components/markdown"
+import { AlertTriangle, BookOpen, ExternalLink, Plus, RefreshCw, Save, StickyNote, X } from "lucide-react"
+import { errorMessage } from "@/lib/api"
+import type { Repository } from "@/lib/types"
 
 interface RepositoryDetailsModalProps {
   repository: Repository | null
   isOpen: boolean
   onClose: () => void
   readmeContent: string
+  readmeError: string | null
   isLoadingReadme: boolean
   onRefreshReadme: () => void
-  onVersionUpdate: (repoId: number, version: string | null) => void
-  onRepositoryUpdate?: (repoId: number, patch: Partial<Repository>) => void
+  onRepositoryUpdate: (repoId: number, patch: Partial<Repository>) => void
+  onSaveNotes: (repoId: number, notes: string | null) => Promise<void>
   onRemoveTag: (repoId: number, tag: string) => Promise<void>
   onAddTag: (repoId: number, tag: string) => Promise<void>
 }
+
+type TabValue = "readme" | "versions" | "notes"
 
 export function RepositoryDetailsModal({
   repository,
   isOpen,
   onClose,
   readmeContent,
+  readmeError,
   isLoadingReadme,
   onRefreshReadme,
-  onVersionUpdate,
   onRepositoryUpdate,
+  onSaveNotes,
   onRemoveTag,
   onAddTag,
 }: RepositoryDetailsModalProps) {
-  const [isEditingTags, setIsEditingTags] = useState(false)
+  const [activeTab, setActiveTab] = useState<TabValue>("readme")
   const [newTag, setNewTag] = useState("")
   const [isUpdatingTags, setIsUpdatingTags] = useState(false)
-  const [localRepository, setLocalRepository] = useState(repository)
-  const [activeTab, setActiveTab] = useState<"readme" | "versions">("readme")
+  const [noteDraft, setNoteDraft] = useState("")
+  const [isSavingNote, setIsSavingNote] = useState(false)
+  const [noteError, setNoteError] = useState<string | null>(null)
+  const [noteSaved, setNoteSaved] = useState(false)
 
-  // Track the previous repository ID to detect actual repo changes vs. prop updates
-  const prevRepoIdRef = useRef<number | null>(null)
+  const previousRepoId = useRef<number | null>(null)
+  const repoId = repository?.id ?? null
 
-  // Update local repository when prop changes (but don't reset tab)
+  // Reset per-repository UI only when the repository actually changes, not on every
+  // prop update (a version refresh, for example).
   useEffect(() => {
-    setLocalRepository(repository)
-  }, [repository])
-
-  // Reset tab only when repository ID actually changes (not on every prop update)
-  useEffect(() => {
-    const currentId = repository?.id ?? null
-    if (prevRepoIdRef.current !== null && prevRepoIdRef.current !== currentId) {
-      // ID changed - reset to readme tab
+    if (previousRepoId.current !== repoId) {
+      previousRepoId.current = repoId
       setActiveTab("readme")
-    }
-    prevRepoIdRef.current = currentId
-  }, [repository?.id])
-
-  const handleRepositoryMetaUpdate = useCallback((repoId: number, patch: Partial<Repository>) => {
-    setLocalRepository((currentRepository) => {
-      if (!currentRepository || currentRepository.id !== repoId) return currentRepository
-      const merged = { ...currentRepository, ...patch }
-      const latestVersion = merged.latestVersion
-      const currentVersion = merged.currentlyUsedVersion
-      const updateAvailable = !!(latestVersion && currentVersion && currentVersion !== latestVersion)
-      return { ...merged, updateAvailable }
-    })
-    onRepositoryUpdate?.(repoId, patch)
-  }, [onRepositoryUpdate])
-
-  // Handle version update locally
-  const handleVersionUpdate = useCallback((repoId: number, version: string | null) => {
-    setLocalRepository((currentRepository) => {
-      if (!currentRepository || currentRepository.id !== repoId) return currentRepository
-      return {
-        ...currentRepository,
-        currentlyUsedVersion: version,
-        updateAvailable: version && currentRepository.latestVersion ? version !== currentRepository.latestVersion : false,
-      }
-    })
-    onVersionUpdate?.(repoId, version)
-  }, [onVersionUpdate])
-
-  if (!localRepository) return null
-
-  const handleAddTag = async () => {
-    if (!newTag.trim()) return
-
-    setIsUpdatingTags(true)
-    try {
-      await onAddTag(localRepository.id, newTag.trim())
       setNewTag("")
-      setIsEditingTags(false)
-    } catch (error) {
-      console.error("Failed to add tag:", error)
-    } finally {
-      setIsUpdatingTags(false)
+      setNoteError(null)
+      setNoteSaved(false)
+      setNoteDraft(repository?.notes ?? "")
     }
-  }
+  }, [repoId, repository?.notes])
 
-  const handleRemoveTag = async (tag: string) => {
+  const handleAddTag = useCallback(async () => {
+    if (!repository || !newTag.trim()) return
     setIsUpdatingTags(true)
     try {
-      await onRemoveTag(localRepository.id, tag)
-    } catch (error) {
-      console.error("Failed to remove tag:", error)
+      await onAddTag(repository.id, newTag.trim())
+      setNewTag("")
     } finally {
       setIsUpdatingTags(false)
     }
+  }, [newTag, onAddTag, repository])
+
+  const handleRemoveTag = useCallback(
+    async (tag: string) => {
+      if (!repository) return
+      setIsUpdatingTags(true)
+      try {
+        await onRemoveTag(repository.id, tag)
+      } finally {
+        setIsUpdatingTags(false)
+      }
+    },
+    [onRemoveTag, repository],
+  )
+
+  const handleSaveNote = useCallback(async () => {
+    if (!repository) return
+    setIsSavingNote(true)
+    setNoteError(null)
+    try {
+      await onSaveNotes(repository.id, noteDraft.trim() === "" ? null : noteDraft)
+      setNoteSaved(true)
+      setTimeout(() => setNoteSaved(false), 2000)
+    } catch (error) {
+      setNoteError(errorMessage(error, "Failed to save note"))
+    } finally {
+      setIsSavingNote(false)
+    }
+  }, [noteDraft, onSaveNotes, repository])
+
+  if (!repository) return null
+
+  const repoRef = {
+    owner: repository.owner,
+    name: repository.name,
+    branch: repository.defaultBranch,
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        className="max-w-6xl w-[95vw] h-[90vh] overflow-hidden flex flex-col"
+        className="flex h-[90vh] w-[95vw] max-w-6xl flex-col overflow-hidden"
         aria-describedby="repository-details-description"
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <span className="truncate">
-              {localRepository.owner}/{localRepository.name}
-            </span>
-            {localRepository.updateAvailable && (
-              <Badge className="text-xs bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100">
-                <AlertTriangle className="h-3 w-3 mr-1" />
-                Update Available
+          <DialogTitle className="flex flex-wrap items-center gap-2">
+            <a
+              href={repository.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="truncate hover:underline"
+            >
+              {repository.owner}/{repository.name}
+            </a>
+            <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+            {repository.updateAvailable && (
+              <Badge className="bg-amber-500/15 text-xs text-amber-700 hover:bg-amber-500/25 dark:text-amber-300">
+                <AlertTriangle className="mr-1 h-3 w-3" />
+                Update available
+              </Badge>
+            )}
+            {repository.archived && (
+              <Badge variant="outline" className="text-xs">
+                Archived
               </Badge>
             )}
           </DialogTitle>
           <div id="repository-details-description" className="sr-only">
-            Repository details for {localRepository.owner}/{localRepository.name}
+            Repository details for {repository.owner}/{repository.name}
           </div>
         </DialogHeader>
 
+        <div className="flex flex-wrap items-center gap-1 border-b border-border pb-3">
+          {repository.customTags.map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs text-primary"
+            >
+              {tag}
+              <button
+                type="button"
+                onClick={() => handleRemoveTag(tag)}
+                disabled={isUpdatingTags}
+                aria-label={`Remove tag ${tag}`}
+                className="rounded-full p-0.5 hover:bg-destructive/20 hover:text-destructive disabled:opacity-50"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+          <div className="ml-auto flex items-center gap-1">
+            <Input
+              value={newTag}
+              onChange={(event) => setNewTag(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  handleAddTag()
+                }
+              }}
+              placeholder="Add tag..."
+              className="h-7 w-36 text-xs"
+              aria-label="Add a custom tag"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2"
+              onClick={handleAddTag}
+              disabled={isUpdatingTags || !newTag.trim()}
+              aria-label="Add tag"
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+
         <div className="flex-1 overflow-hidden">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "readme" | "versions")} className="h-full flex flex-col">
-            <TabsList className="grid w-full grid-cols-2 shrink-0">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as TabValue)}
+            className="flex h-full flex-col"
+          >
+            <TabsList className="grid w-full shrink-0 grid-cols-3">
               <TabsTrigger value="readme">README</TabsTrigger>
               <TabsTrigger value="versions">Changelog</TabsTrigger>
+              <TabsTrigger value="notes">
+                Notes
+                {repository.notes ? <span className="ml-1 h-1.5 w-1.5 rounded-full bg-primary" /> : null}
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="readme" className="flex-1 overflow-hidden mt-0" style={{ minHeight: 0 }}>
-              <div className="flex flex-col h-full">
-                <div className="flex items-center justify-between mb-4 shrink-0">
-                  <h4 className="text-sm font-medium flex items-center gap-2">
+            <TabsContent value="readme" className="mt-0 flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+              <div className="flex h-full flex-col">
+                <div className="mb-3 flex shrink-0 items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-sm font-medium">
                     <BookOpen className="h-4 w-4" />
                     README.md
-                  </h4>
+                  </h3>
                   <Button onClick={onRefreshReadme} disabled={isLoadingReadme} variant="outline" size="sm">
-                    <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingReadme ? "animate-spin" : ""}`} />
+                    <RefreshCw className={`mr-2 h-4 w-4 ${isLoadingReadme ? "animate-spin" : ""}`} />
                     Refresh
                   </Button>
                 </div>
 
                 {isLoadingReadme ? (
                   <div className="flex items-center justify-center py-12">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
+                  </div>
+                ) : readmeError ? (
+                  <div className="py-12 text-center text-muted-foreground">
+                    <BookOpen className="mx-auto mb-4 h-12 w-12 opacity-50" />
+                    <p>{readmeError}</p>
                   </div>
                 ) : readmeContent ? (
-                  <div className="bg-white dark:bg-gray-900 border rounded-lg overflow-hidden shadow-sm flex-1 flex flex-col">
-                    <div className="p-6 overflow-y-auto flex-1">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[
-                          rehypeRaw,
-                          [rehypeSanitize, {
-                            ...defaultSchema,
-                            tagNames: [
-                              ...(defaultSchema.tagNames || []),
-                              'img', 'a', 'hr', 'div', 'span', 'center', 'br', 'sup', 'sub'
-                            ],
-                            attributes: {
-                              ...defaultSchema.attributes,
-                              img: ['src', 'alt', 'title', 'width', 'height', 'align'],
-                              a: ['href', 'title', 'target', 'rel'],
-                              div: ['align', 'style'],
-                              span: ['style'],
-                              '*': ['className']
-                            }
-                          }]
-                        ]}
-                        components={{
-                          h1: ({ children, ...props }) => (
-                            <h1
-                              className="text-3xl font-bold mb-6 mt-8 first:mt-0 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700 pb-2"
-                              {...props}
-                            >
-                              {children}
-                            </h1>
-                          ),
-                          h2: ({ children, ...props }) => (
-                            <h2 className="text-2xl font-semibold mb-4 mt-6 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700 pb-1" {...props}>
-                              {children}
-                            </h2>
-                          ),
-                          h3: ({ children, ...props }) => (
-                            <h3 className="text-xl font-semibold mb-3 mt-5 text-gray-900 dark:text-gray-100" {...props}>
-                              {children}
-                            </h3>
-                          ),
-                          h4: ({ children, ...props }) => (
-                            <h4 className="text-lg font-semibold mb-2 mt-4 text-gray-900 dark:text-gray-100" {...props}>
-                              {children}
-                            </h4>
-                          ),
-                          h5: ({ children, ...props }) => (
-                            <h5 className="text-base font-semibold mb-2 mt-3 text-gray-900 dark:text-gray-100" {...props}>
-                              {children}
-                            </h5>
-                          ),
-                          h6: ({ children, ...props }) => (
-                            <h6 className="text-sm font-semibold mb-2 mt-3 text-gray-900 dark:text-gray-100" {...props}>
-                              {children}
-                            </h6>
-                          ),
-                          p: ({ children, ...props }) => (
-                            <p className="mb-4 text-gray-800 dark:text-gray-200 leading-relaxed" {...props}>
-                              {children}
-                            </p>
-                          ),
-                          a: ({ href, children, ...props }) => {
-                            const isExternal = href && (href.startsWith('http') || href.startsWith('https'))
-                            const isEmail = href && href.startsWith('mailto:')
-                            
-                            return (
-                              <a
-                                href={href}
-                                target={isExternal ? "_blank" : "_self"}
-                                rel={isExternal ? "noopener noreferrer" : undefined}
-                                className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline decoration-1 underline-offset-2 hover:decoration-2 transition-all"
-                                {...props}
-                              >
-                                {children}
-                              </a>
-                            )
-                          },
-                          img: ({ src, alt, ...props }) => {
-                            // Handle relative image URLs for GitHub repositories
-                            let imageSrc = src || "/placeholder.svg"
-                            
-                            if (localRepository && src && !src.startsWith('http') && !src.startsWith('data:')) {
-                              // Convert relative URLs to GitHub raw URLs
-                              const baseUrl = `https://raw.githubusercontent.com/${localRepository.owner}/${localRepository.name}/main/`
-                              imageSrc = src.startsWith('./') ? baseUrl + src.slice(2) : 
-                                        src.startsWith('/') ? baseUrl + src.slice(1) : 
-                                        baseUrl + src
-                            }
-                            
-                            return (
-                              <img
-                                src={imageSrc}
-                                alt={alt || "Repository image"}
-                                loading="lazy"
-                                className="max-w-full h-auto rounded border border-gray-200 dark:border-gray-700 my-4"
-                                onError={(e) => {
-                                  const target = e.target as HTMLImageElement
-                                  target.style.display = "none"
-                                }}
-                                {...props}
-                              />
-                            )
-                          },
-                          ul: ({ children, ...props }) => (
-                            <ul className="mb-4 ml-6 list-disc space-y-1" {...props}>
-                              {children}
-                            </ul>
-                          ),
-                          ol: ({ children, ...props }) => (
-                            <ol className="mb-4 ml-6 list-decimal space-y-1" {...props}>
-                              {children}
-                            </ol>
-                          ),
-                          li: ({ children, ...props }) => (
-                            <li className="text-gray-800 dark:text-gray-200 leading-relaxed" {...props}>
-                              {children}
-                            </li>
-                          ),
-                          pre: ({ children, ...props }) => (
-                            <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-700 mb-4 text-sm text-gray-900 dark:text-gray-100" {...props}>
-                              {children}
-                            </pre>
-                          ),
-                          code: ({ children, className, ...props }) => {
-                            const isInline = !className
-                            return isInline ? (
-                              <code
-                                className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-sm font-mono text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700"
-                                {...props}
-                              >
-                                {children}
-                              </code>
-                            ) : (
-                              <code className="text-sm font-mono text-gray-900 dark:text-gray-100" {...props}>
-                                {children}
-                              </code>
-                            )
-                          },
-                          table: ({ children, ...props }) => (
-                            <div className="overflow-x-auto mb-4">
-                              <table className="min-w-full border-collapse border border-gray-200 dark:border-gray-700 rounded-lg" {...props}>
-                                {children}
-                              </table>
-                            </div>
-                          ),
-                          thead: ({ children, ...props }) => (
-                            <thead className="bg-gray-50 dark:bg-gray-800" {...props}>
-                              {children}
-                            </thead>
-                          ),
-                          th: ({ children, ...props }) => (
-                            <th
-                              className="border border-gray-200 dark:border-gray-700 px-4 py-3 font-semibold text-left text-gray-900 dark:text-gray-100"
-                              {...props}
-                            >
-                              {children}
-                            </th>
-                          ),
-                          td: ({ children, ...props }) => (
-                            <td className="border border-gray-200 dark:border-gray-700 px-4 py-3 text-gray-800 dark:text-gray-200" {...props}>
-                              {children}
-                            </td>
-                          ),
-                          blockquote: ({ children, ...props }) => (
-                            <blockquote
-                              className="border-l-4 border-blue-500 dark:border-blue-400 pl-4 py-2 mb-4 bg-blue-50 dark:bg-blue-900/20 italic text-gray-800 dark:text-gray-200"
-                              {...props}
-                            >
-                              {children}
-                            </blockquote>
-                          ),
-                          hr: ({ ...props }) => <hr className="my-6 border-gray-200 dark:border-gray-700" {...props} />,
-                          // Custom handling for inline HTML elements that are common in GitHub markdown
-                          span: ({ children, ...props }) => (
-                            <span className="text-gray-800 dark:text-gray-200" {...props}>
-                              {children}
-                            </span>
-                          ),
-                          div: ({ children, ...props }) => (
-                            <div className="text-gray-800 dark:text-gray-200" {...props}>
-                              {children}
-                            </div>
-                          ),
-                          strong: ({ children, ...props }) => (
-                            <strong className="font-semibold text-gray-900 dark:text-gray-100" {...props}>
-                              {children}
-                            </strong>
-                          ),
-                          em: ({ children, ...props }) => (
-                            <em className="italic text-gray-800 dark:text-gray-200" {...props}>
-                              {children}
-                            </em>
-                          ),
-                        }}
-                      >
-                        {readmeContent}
-                      </ReactMarkdown>
+                  <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
+                    <div className="flex-1 overflow-y-auto p-6">
+                      <Markdown repo={repoRef}>{readmeContent}</Markdown>
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <BookOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <div className="py-12 text-center text-muted-foreground">
+                    <BookOpen className="mx-auto mb-4 h-12 w-12 opacity-50" />
                     <p>No README found for this repository</p>
                   </div>
                 )}
               </div>
             </TabsContent>
 
-            <TabsContent value="versions" className="flex-1 overflow-hidden mt-0" style={{ minHeight: 0 }}>
-              <div className="flex flex-col h-full">
-                {activeTab === "versions" ? (
-                  <VersionTracker
-                    repository={localRepository}
-                    onVersionUpdate={handleVersionUpdate}
-                    onRepositoryMetaUpdate={handleRepositoryMetaUpdate}
-                  />
-                ) : (
-                  <div className="text-sm text-muted-foreground">Select the "Changelog" tab to load releases.</div>
+            <TabsContent value="versions" className="mt-0 flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+              {/* Mounted lazily so opening the modal does not hit the releases API. */}
+              {activeTab === "versions" && (
+                <VersionTracker repository={repository} onRepositoryUpdate={onRepositoryUpdate} />
+              )}
+            </TabsContent>
+
+            <TabsContent value="notes" className="mt-0 flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+              <div className="flex h-full flex-col gap-3">
+                <div className="flex shrink-0 items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-sm font-medium">
+                    <StickyNote className="h-4 w-4" />
+                    Your notes
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    {noteSaved && <span className="text-xs text-muted-foreground">Saved</span>}
+                    <Button size="sm" onClick={handleSaveNote} disabled={isSavingNote}>
+                      <Save className="mr-2 h-4 w-4" />
+                      Save
+                    </Button>
+                  </div>
+                </div>
+                {noteError && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {noteError}
+                  </p>
+                )}
+                <Textarea
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  placeholder="Why did you star this? Markdown is supported, and notes are searchable from the dashboard."
+                  className="min-h-[8rem] flex-1 font-mono text-sm"
+                  aria-label="Repository notes"
+                />
+                {noteDraft.trim() && (
+                  <div className="max-h-52 shrink-0 overflow-y-auto rounded-md border border-border p-3">
+                    <Markdown compact repo={repoRef}>
+                      {noteDraft}
+                    </Markdown>
+                  </div>
                 )}
               </div>
             </TabsContent>
