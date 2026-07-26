@@ -8,9 +8,19 @@
 # Dependencies
 **/node_modules
 
-# Build outputs
+# Build outputs. `out` and `.next` are produced by a local `npm run build`; without
+# these entries a stale local export was copied into the build context (and then
+# overwritten inside the image), inflating both.
 **/build
 **/dist
+**/.next
+new_frontend/out
+
+# Docs and metadata that never affect the build
+README.md
+LICENSE
+**/design.md
+.github
 
 # Version control
 .git

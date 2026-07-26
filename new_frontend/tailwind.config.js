@@ -1,4 +1,14 @@
 /** @type {import('tailwindcss').Config} */
+
+// app/globals.css used to define these tokens as complete `oklch(...)` colors while
+// this config wrapped them in `hsl(...)`, emitting `hsl(oklch(1 0 0))` - invalid CSS
+// that every browser drops. That is why bg-background / text-primary / border-border
+// rendered as nothing and why dark mode appeared not to work.
+//
+// The tokens are now bare HSL triplets ("0 0% 100%"), which is also what lets
+// Tailwind substitute an alpha channel for modifiers like bg-primary/10.
+const token = (name) => `hsl(var(--${name}) / <alpha-value>)`;
+
 module.exports = {
   darkMode: ["class"],
   content: [
@@ -6,6 +16,8 @@ module.exports = {
     './components/**/*.{ts,tsx}',
     './app/**/*.{ts,tsx}',
     './src/**/*.{ts,tsx}',
+    './lib/**/*.{ts,tsx}',
+    './hooks/**/*.{ts,tsx}',
   ],
   prefix: "",
   theme: {
@@ -18,38 +30,56 @@ module.exports = {
     },
     extend: {
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        border: token('border'),
+        input: token('input'),
+        ring: token('ring'),
+        background: token('background'),
+        foreground: token('foreground'),
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: token('primary'),
+          foreground: token('primary-foreground'),
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: token('secondary'),
+          foreground: token('secondary-foreground'),
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: token('destructive'),
+          foreground: token('destructive-foreground'),
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: token('muted'),
+          foreground: token('muted-foreground'),
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: token('accent'),
+          foreground: token('accent-foreground'),
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: token('popover'),
+          foreground: token('popover-foreground'),
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: token('card'),
+          foreground: token('card-foreground'),
+        },
+        // Defined in globals.css but previously not exposed to Tailwind at all.
+        chart: {
+          1: token('chart-1'),
+          2: token('chart-2'),
+          3: token('chart-3'),
+          4: token('chart-4'),
+          5: token('chart-5'),
+        },
+        sidebar: {
+          DEFAULT: token('sidebar'),
+          foreground: token('sidebar-foreground'),
+          primary: token('sidebar-primary'),
+          'primary-foreground': token('sidebar-primary-foreground'),
+          accent: token('sidebar-accent'),
+          'accent-foreground': token('sidebar-accent-foreground'),
+          border: token('sidebar-border'),
+          ring: token('sidebar-ring'),
         },
       },
       borderRadius: {
@@ -73,5 +103,5 @@ module.exports = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 }

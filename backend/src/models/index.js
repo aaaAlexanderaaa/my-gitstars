@@ -2,7 +2,7 @@ const { Sequelize, DataTypes } = require('sequelize');
 const config = require('../config/database.js');
 
 const env = process.env.NODE_ENV || 'development';
-const dbConfig = config[env];
+const dbConfig = config.resolve(env);
 
 const sequelize = new Sequelize(
   {
@@ -23,10 +23,10 @@ const User = sequelize.define('User', {
 });
 
 const Repo = sequelize.define('Repo', {
-  githubId: {
-    type: DataTypes.STRING,
-    unique: true
-  },
+  // Not globally unique: the same GitHub repo can be starred by many users.
+  // Uniqueness is enforced per user by the (UserId, githubId) index — see
+  // migrations/20240320000009-scope-repos-per-user.js.
+  githubId: DataTypes.STRING,
   name: DataTypes.STRING,
   fullName: {
     type: DataTypes.STRING,
@@ -116,8 +116,26 @@ const Repo = sequelize.define('Repo', {
     type: DataTypes.DATE,
     allowNull: true,
     field: 'releases_last_fetched'
+  },
+  releasesFetchError: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    field: 'releases_fetch_error'
+  },
+  notes: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
+}, {
+  indexes: [
+    { unique: true, fields: ['UserId', 'githubId'], name: 'repos_user_id_github_id_unique' }
+  ]
 });
+
+// Column list Repo.upsert() is allowed to overwrite during a star sync. Anything
+// user-owned (tags, notes, the chosen version) is deliberately absent so a sync
+// never clobbers it.
+const REPO_SYNC_CONFLICT_FIELDS = ['UserId', 'githubId'];
 
 const SyncStatus = sequelize.define('SyncStatus', {
   userId: {
@@ -189,5 +207,6 @@ module.exports = {
   User,
   Repo,
   SyncStatus,
-  Release
+  Release,
+  REPO_SYNC_CONFLICT_FIELDS
 }; 

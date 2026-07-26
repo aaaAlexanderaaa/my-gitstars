@@ -7,12 +7,59 @@ const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 2000; // 2 seconds between retries
 const PAGE_DELAY_MS = 500; // 500ms delay between paginated requests
 const RATE_LIMIT_BUFFER = 100; // Stop when remaining requests fall below this
+const MAX_RETRY_WAIT_MS = 60000; // Cap on an honoured Retry-After
+const MAX_STAR_PAGES = 200; // 20k stars; a guard against an endless pagination loop
+const PER_PAGE = 100;
 
 // Helper to delay execution
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * GitHub answers a secondary ("abuse detection") rate limit with 403 and a message,
+ * which is retryable - unlike a 403 for missing permissions, which is not.
+ */
+function isSecondaryRateLimit(error) {
+  const status = error.status || error.response?.status;
+  if (status !== 403) return false;
+  const message = String(error.message || '').toLowerCase();
+  if (message.includes('rate limit') || message.includes('abuse') || message.includes('secondary')) return true;
+  return error.response?.headers?.['x-ratelimit-remaining'] === '0';
+}
+
 // Shared outbound proxy agent (null when no proxy is configured).
 const proxyAgent = getProxyConfig();
+
+/**
+ * @octokit/request 6.x resolves its fetch as
+ *   requestOptions.request.fetch || globalThis.fetch || node-fetch
+ * so on Node 18+ it uses undici, which ignores the `agent` option entirely (undici
+ * wants a `dispatcher`). The `timeout` option is not implemented by that version at
+ * all. The result was that HTTP_PROXY silently did nothing for the star sync and
+ * release fetches - only the axios calls in routes/repos.js honoured it - and no
+ * request ever timed out.
+ *
+ * This wrapper restores both: node-fetch (which does support `agent`) whenever a
+ * proxy is configured, and an AbortSignal-based timeout in every case.
+ */
+function buildFetch() {
+  const nodeFetch = proxyAgent ? require('node-fetch') : null;
+
+  return function timedFetch(url, options = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+    const impl = nodeFetch || globalThis.fetch;
+    const requestOptions = {
+      ...options,
+      signal: options.signal || controller.signal,
+      ...(proxyAgent ? { agent: proxyAgent } : {})
+    };
+
+    return impl(url, requestOptions).finally(() => clearTimeout(timer));
+  };
+}
+
+const octokitFetch = buildFetch();
 
 class GitHubService {
   constructor(accessToken) {
@@ -20,8 +67,7 @@ class GitHubService {
       auth: accessToken,
       baseUrl: 'https://api.github.com',
       request: {
-        timeout: API_TIMEOUT_MS,
-        ...(proxyAgent ? { agent: proxyAgent } : {})
+        fetch: octokitFetch
       }
     });
     this.rateLimitRemaining = null;
@@ -66,17 +112,28 @@ class GitHubService {
       } catch (error) {
         lastError = error;
         const status = error.status || error.response?.status;
+        // Rate-limit headers also come back on failures; record them so the next
+        // request waits instead of hammering a limit we already know we hit.
+        this.updateRateLimitInfo(error.response || {});
 
-        // Don't retry on auth errors or not found
-        if (status === 401 || status === 403 || status === 404) {
+        const secondaryRateLimit = isSecondaryRateLimit(error);
+
+        // Don't retry on auth errors or not found. A 403 is only worth retrying when
+        // GitHub says it is an abuse/secondary rate limit rather than a permission
+        // problem, and 429 is always a rate limit.
+        if (status === 401 || status === 404 || (status === 403 && !secondaryRateLimit)) {
           throw error;
         }
 
-        // Retry on timeout (504), server errors (5xx), or network errors
-        const isRetryable = status === 504 || status >= 500 || !status;
+        // Retry on rate limits, server errors, timeouts and network failures.
+        const isRetryable = status === 429 || secondaryRateLimit || status === 504 || status >= 500 || !status;
 
         if (isRetryable && attempt < RETRY_ATTEMPTS) {
-          const waitTime = RETRY_DELAY_MS * attempt; // Exponential backoff
+          // Honour Retry-After when GitHub supplies it; otherwise back off linearly.
+          const retryAfter = Number(error.response?.headers?.['retry-after']);
+          const waitTime = Number.isFinite(retryAfter) && retryAfter > 0
+            ? Math.min(retryAfter * 1000, MAX_RETRY_WAIT_MS)
+            : RETRY_DELAY_MS * attempt;
           console.log(`[github-api] ${context} failed (attempt ${attempt}/${RETRY_ATTEMPTS}, status=${status}), retrying in ${waitTime}ms...`);
           await delay(waitTime);
         } else if (!isRetryable) {
@@ -90,12 +147,13 @@ class GitHubService {
 
   async getAllStarredRepos() {
     const stars = [];
+    const seenIds = new Set();
     let page = 1;
 
-    while (true) {
+    while (page <= MAX_STAR_PAGES) {
       const response = await this.withRetry(
         () => this.octokit.activity.listReposStarredByAuthenticatedUser({
-          per_page: 100,
+          per_page: PER_PAGE,
           page: page,
           headers: {
             Accept: 'application/vnd.github.v3.star+json'
@@ -129,13 +187,28 @@ class GitHubService {
         starredAt: item.starred_at ? new Date(item.starred_at) : null
       }));
 
-      stars.push(...mappedRepos);
-      page++;
-
-      // Add delay between pages to avoid hitting secondary rate limits
-      if (response.data.length === 100) {
-        await delay(PAGE_DELAY_MS);
+      // A page that repeats what we already have means pagination is not advancing;
+      // stop rather than loop forever. It also guarantees the upsert loop downstream
+      // never sees the same githubId twice within one transaction.
+      let added = 0;
+      for (const repo of mappedRepos) {
+        if (seenIds.has(repo.githubId)) continue;
+        seenIds.add(repo.githubId);
+        stars.push(repo);
+        added++;
       }
+      if (added === 0) break;
+
+      // The last page is short; only pause when a full page suggests more to come.
+      if (response.data.length < PER_PAGE) break;
+
+      page++;
+      // Add delay between pages to avoid hitting secondary rate limits
+      await delay(PAGE_DELAY_MS);
+    }
+
+    if (page > MAX_STAR_PAGES) {
+      console.warn(`[github-api] stopped paginating starred repos at ${MAX_STAR_PAGES} pages (${stars.length} repos)`);
     }
 
     return stars;

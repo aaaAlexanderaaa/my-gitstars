@@ -7,6 +7,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_SYNC_FAILURE_BACKOFF_MS = 30 * 60 * 1000; // 30 minutes
 const DEFAULT_SYNC_AUTH_FAILURE_BACKOFF_MS = 24 * 60 * 60 * 1000; // 24 hours
 const DEFAULT_STARTUP_DELAY_MS = 30 * 1000; // 30 seconds delay before first run
+// Oldest-first, so a user with hundreds of tracked repos still makes progress each
+// tick without spending the whole GitHub rate limit in one go.
+const MAX_TRACKED_REPOS_PER_TICK = 50;
 
 function parseMs(value, fallbackMs) {
   const parsed = Number.parseInt(String(value || ''), 10);
@@ -98,6 +101,8 @@ async function runVersionTrackingTick(versionTrackingTag, minFetchAgeMs) {
           customTags: { [Op.overlap]: [versionTrackingTag] }
         },
         attributes: ['id'],
+        limit: MAX_TRACKED_REPOS_PER_TICK,
+        order: [['releasesLastFetched', 'ASC NULLS FIRST']],
         raw: true
       });
 
@@ -143,7 +148,10 @@ function startSchedulers(options = {}) {
     if (versionTrackingRunning) return;
     versionTrackingRunning = true;
     try {
-      await runVersionTrackingTick(versionTrackingTag, versionTrackingTickIntervalMs);
+      // Slightly under the tick interval: passing the interval itself meant a repo
+      // fetched on tick N was 1ms too fresh on tick N+1, so tracking only ran on
+      // every other tick.
+      await runVersionTrackingTick(versionTrackingTag, Math.floor(versionTrackingTickIntervalMs * 0.9));
     } finally {
       versionTrackingRunning = false;
     }
