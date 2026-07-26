@@ -1,18 +1,123 @@
-name: Docker Image CI
+# Renamed: both workflows used to be called "Docker Image CI", which made the status
+# checks on a pull request ambiguous.
+name: Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
+  frontend:
+    name: Frontend lint, types, tests and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: new_frontend/package-lock.json
+      - run: npm ci --legacy-peer-deps
+        working-directory: new_frontend
+      - run: npm run typecheck
+        working-directory: new_frontend
+      - run: npm run lint
+        working-directory: new_frontend
+      - run: npm test
+        working-directory: new_frontend
+      - run: npm run build
+        working-directory: new_frontend
 
-  build:
-
+  backend:
+    name: Backend tests
     runs-on: ubuntu-latest
 
+    # The data-layer tests assert on real PostgreSQL behaviour (ON CONFLICT targets,
+    # array operators, the empty-NOT-IN degeneracy), so they need a real database.
+    # Without one they self-skip, which would quietly stop guarding the two bugs that
+    # could delete a user's repositories.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gitstars_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: gitstars_test
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-gitstars:$(date +%s)
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Check every source file parses
+        run: npm run check
+        working-directory: backend
+      - name: Apply migrations
+        run: npm run migrate
+        working-directory: backend
+      - name: Migrations roll back and re-apply cleanly
+        working-directory: backend
+        run: |
+          npm run migrate:undo
+          npm run migrate:undo
+          npm run migrate
+      - name: Unit and integration tests
+        working-directory: backend
+        # `shell: bash` also turns on pipefail, so a failure through `tee` still fails.
+        shell: bash
+        run: |
+          npm run test:unit 2>&1 | tee test-output.txt
+          # The data-layer tests self-skip when no database is reachable. In CI that
+          # would silently stop guarding the two bugs that could delete a user's
+          # repositories, so treat a skip as a failure here.
+          if grep -q '# SKIP' test-output.txt; then
+            echo "::error::database-backed tests were skipped in CI"
+            exit 1
+          fi
+      - name: HTTP smoke test
+        run: npm run test:smoke
+        working-directory: backend
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: my-gitstars:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify the exported frontend landed in the image
+        run: |
+          docker run --rm --entrypoint sh my-gitstars:ci -c \
+            'test -f /app/frontend/build/index.html && test -f /app/frontend/build/dashboard/index.html'
+      - name: Verify the image runs unprivileged
+        run: |
+          test "$(docker run --rm --entrypoint id my-gitstars:ci -u)" != "0"
