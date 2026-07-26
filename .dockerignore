@@ -16,10 +16,11 @@
 **/.next
 new_frontend/out
 
-# Docs and metadata that never affect the build
-README.md
+# Docs and metadata that never affect the build. Nothing in the image reads markdown,
+# so the glob covers README.md, CONTRIBUTING.md and everything under docs/.
+**/*.md
+docs
 LICENSE
-**/design.md
 .github
 
 # Version control
