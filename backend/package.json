@@ -3,29 +3,35 @@
   "version": "1.0.0",
   "description": "Backend API for GitHub Stars Manager",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "nodemon src/index.js",
+    "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "check": "find src migrations -name '*.js' -print0 | xargs -0 -n1 node --check && node --check wait-db.js",
     "migrate": "sequelize-cli db:migrate",
     "migrate:undo": "sequelize-cli db:migrate:undo",
-    "migrate:status": "sequelize-cli db:migrate:status"
+    "migrate:status": "sequelize-cli db:migrate:status",
+    "test": "npm run test:unit && npm run test:smoke",
+    "test:unit": "node --test --test-concurrency=1 'test/*.test.js'",
+    "test:smoke": "node scripts/smoke-http.js"
   },
   "dependencies": {
     "@octokit/rest": "^19.0.13",
     "axios": "^1.6.7",
+    "connect-session-sequelize": "^7.1.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.18.2",
     "express-session": "^1.18.1",
     "https-proxy-agent": "^7.0.6",
-    "connect-session-sequelize": "^7.1.7",
-    "passport": "^0.4.1",
+    "node-fetch": "^2.7.0",
+    "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
     "pg": "^8.13.1",
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.37.1",
-    "http-proxy-middleware": "^2.0.6",
-    "cookie-parser": "^1.4.6",
     "sequelize-cli": "^6.6.2"
   },
   "devDependencies": {

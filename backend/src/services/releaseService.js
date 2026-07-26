@@ -5,6 +5,8 @@ const { Op } = require('sequelize');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BULK_FETCH_DELAY_MS = 1000; // 1 second delay between repos in bulk fetch
 const MAX_BULK_FETCH_LIMIT = 50; // Maximum repos to process in a single bulk fetch (rate limit safety)
+// A failed fetch is retried sooner than a successful one instead of being cached for a full day.
+const ERROR_RETRY_AFTER_MS = 30 * 60 * 1000; // 30 minutes
 
 // Helper to delay execution
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -31,14 +33,26 @@ class ReleaseService {
     const ghService = githubService || new GitHubService(user.accessToken);
 
     try {
-      // Fetch releases from GitHub
-      const releases = await ghService.getRepositoryReleases(repo.owner, repo.name);
-      
+      // Fetch releases from GitHub. Drafts are only visible to maintainers, are not
+      // installable, and (having no publishedAt) used to sort to the top of the list
+      // and be offered as a selectable "current version".
+      const fetched = (await ghService.getRepositoryReleases(repo.owner, repo.name))
+        .filter(release => !release.isDraft);
+
+      // The list endpoint is ordered by created_at; "latest" is defined by published_at.
+      const releases = [...fetched].sort(
+        (a, b) => (b.publishedAt ? b.publishedAt.getTime() : 0) - (a.publishedAt ? a.publishedAt.getTime() : 0)
+      );
+
       if (releases.length === 0) {
-        // No releases found, update repo status
+        // No releases found. Also clear the version fields: leaving a stale
+        // latestVersion behind kept a repo flagged as having an update forever.
         await repo.update({
           hasReleases: false,
-          releasesLastFetched: new Date()
+          latestVersion: null,
+          updateAvailable: false,
+          releasesLastFetched: new Date(),
+          releasesFetchError: null
         });
         return [];
       }
@@ -67,50 +81,75 @@ class ReleaseService {
         storedReleases.push(release);
       }
 
-      // Update repository metadata
-      // GitHub "latest release" is the most recent non-draft, non-prerelease.
-      const latestStableRelease = releases.find(r => !r.isPrerelease && !r.isDraft) || null;
+      await this.pruneDeletedReleases(repo.id, releases);
+
+      // GitHub's "latest release" is the newest non-draft, non-prerelease. Projects
+      // that only ever ship pre-releases have no such release, so fall back to their
+      // newest release instead of reporting no version at all.
+      const latestStableRelease =
+        releases.find(release => !release.isPrerelease) || releases[0] || null;
+
       const updateData = {
         hasReleases: true,
-        releasesLastFetched: new Date()
+        releasesLastFetched: new Date(),
+        releasesFetchError: null,
+        latestVersion: latestStableRelease ? latestStableRelease.tagName : null
       };
 
-      if (latestStableRelease) {
-        updateData.latestVersion = latestStableRelease.tagName;
-
-        // Set currently_used_version to latest only on FIRST successful fetch with releases
-        // Use hasReleases (not releasesLastFetched) since releasesLastFetched is set on errors too
-        if (!repo.currentlyUsedVersion && !repo.hasReleases) {
-          updateData.currentlyUsedVersion = latestStableRelease.tagName;
-        }
-
-        // Calculate if update is available (null means "not using", so no update)
-        const currentVersion = repo.currentlyUsedVersion || updateData.currentlyUsedVersion;
-        updateData.updateAvailable = currentVersion
-          ? currentVersion !== latestStableRelease.tagName
-          : false;
-      } else {
-        // No stable "latest" exists per GitHub semantics (only pre-releases/drafts).
-        updateData.latestVersion = null;
-        updateData.updateAvailable = false;
-        if (!repo.currentlyUsedVersion) {
-          updateData.currentlyUsedVersion = null;
-        }
+      // Adopt the latest version only on the FIRST successful fetch that found
+      // releases, so a user's explicit choice is never overwritten later.
+      if (!repo.currentlyUsedVersion && !repo.hasReleases && latestStableRelease) {
+        updateData.currentlyUsedVersion = latestStableRelease.tagName;
       }
+
+      const currentVersion = repo.currentlyUsedVersion || updateData.currentlyUsedVersion;
+      updateData.updateAvailable = !!(
+        currentVersion &&
+        updateData.latestVersion &&
+        currentVersion !== updateData.latestVersion
+      );
 
       await repo.update(updateData);
 
       return storedReleases;
     } catch (error) {
       console.error(`Error fetching releases for repo ${repo.fullName}:`, error);
-      
-      // Update last fetched time even on error
+
+      // Back off from the failing repo without pretending the fetch succeeded:
+      // stamping the real "last fetched" time here used to cache the failure for 24h.
       await repo.update({
-        releasesLastFetched: new Date()
+        releasesLastFetched: new Date(Date.now() - (DAY_MS - ERROR_RETRY_AFTER_MS)),
+        releasesFetchError: String(error.message || error).slice(0, 500)
       });
-      
+
       throw error;
     }
+  }
+
+  /**
+   * Drops rows for releases GitHub no longer returns, so a deleted or un-published
+   * release stops showing up as a selectable version.
+   *
+   * Only the newest page is fetched, so pruning is limited to the window we can see:
+   * anything older than the oldest release in the response is left alone.
+   */
+  static async pruneDeletedReleases(repoId, fetchedReleases) {
+    const publishedTimes = fetchedReleases
+      .map(release => (release.publishedAt ? release.publishedAt.getTime() : null))
+      .filter(time => time !== null);
+
+    if (publishedTimes.length === 0) return 0;
+
+    const oldestFetched = new Date(Math.min(...publishedTimes));
+    const keepIds = fetchedReleases.map(release => release.githubReleaseId);
+
+    return Release.destroy({
+      where: {
+        repoId,
+        publishedAt: { [Op.gte]: oldestFetched },
+        githubReleaseId: { [Op.notIn]: keepIds }
+      }
+    });
   }
 
   /**
@@ -140,7 +179,9 @@ class ReleaseService {
 
     return await Release.findAll({
       where: { repoId },
-      order: [['publishedAt', 'DESC']],
+      // Postgres sorts NULLs first on DESC, which used to float releases with no
+      // publish date to the top of the changelog.
+      order: [['publishedAt', 'DESC NULLS LAST']],
       attributes: ['id', 'tagName', 'name', 'body', 'publishedAt', 'isPrerelease', 'isDraft']
     });
   }
@@ -188,11 +229,14 @@ class ReleaseService {
       }
     }
     
-    // Calculate if update is available (null means "not using", so no update available)
-    const updateAvailable = currentlyUsedVersion
-      ? currentlyUsedVersion !== repo.latestVersion
-      : false;
-    
+    // "Not using" (null) means no update. A repo with no known latest version cannot
+    // have an update either - comparing against null used to flag one permanently.
+    const updateAvailable = !!(
+      currentlyUsedVersion &&
+      repo.latestVersion &&
+      currentlyUsedVersion !== repo.latestVersion
+    );
+
     await repo.update({ currentlyUsedVersion, updateAvailable });
     
     // Reload to get fresh data
@@ -240,8 +284,10 @@ class ReleaseService {
       ? options.minFetchAgeMs
       : DAY_MS;
 
+    // Don't spend GitHub rate limit on repos the user no longer stars.
     const whereCondition = {
-      UserId: userId
+      UserId: userId,
+      isFollowed: true
     };
 
     if (!force) {
