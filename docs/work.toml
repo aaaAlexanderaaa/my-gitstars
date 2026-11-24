@@ -5,21 +5,21 @@
 id = "M-GOV-01"
 domain = "governance"
 name = "Adopt template-project Engineering Discipline Baseline"
-slot = "now"
+slot = "done"
 depends_on = []
 
 [[milestones]]
 id = "M-AUTO-01"
 domain = "backend-api"
 name = "Machine-Readable Release Summary API & Programmatic Version Tracking"
-slot = "next"
+slot = "now"
 depends_on = ["M-GOV-01"]
 
 [[milestones]]
 id = "M-OPS-01"
 domain = "runtime"
 name = "Reproducible Container Builds with Pinned Base Images"
-slot = "next"
+slot = "now"
 depends_on = ["M-GOV-01"]
 
 [[milestones]]
@@ -33,8 +33,8 @@ depends_on = ["M-AUTO-01", "M-OPS-01"]
 id = "T-001"
 milestone = "M-GOV-01"
 title = "Add docs-policy.toml, AGENTS.md, ARCHITECTURE.md, docs/work.toml, and docs/discipline-adoption.md at observed adoption stage"
-state = "ready_for_check"
-human_check = "pending"
+state = "done"
+human_check = "approved"
 specs = []
 decisions = []
 sources = []
@@ -44,7 +44,7 @@ blocker_options = []
 [[tasks]]
 id = "T-010"
 milestone = "M-AUTO-01"
-title = "Add optional Bearer API token authentication for automation clients (disabled by default, constant-time comparison, scoped permissions)"
+title = "Add optional static Bearer API token middleware via API_BEARER_TOKEN (disabled by default, crypto.timingSafeEqual comparison, 401 on invalid token, preserving existing session cookie behavior) in a focused module"
 state = "todo"
 human_check = "pending"
 specs = []
@@ -56,7 +56,7 @@ blocker_options = []
 [[tasks]]
 id = "T-011"
 milestone = "M-AUTO-01"
-title = "Support programmatic owner/repo version tracking persisted via Sequelize migration without requiring or polluting GitHub stars"
+title = "Add programmatic owner/repo version tracking endpoint (e.g., POST /api/tracking/repos/sync) backed by a reversible Sequelize migration and covered by the 6-hour release scheduler without requiring or polluting GitHub stars"
 state = "todo"
 human_check = "pending"
 specs = []
@@ -68,7 +68,7 @@ blocker_options = []
 [[tasks]]
 id = "T-012"
 milestone = "M-AUTO-01"
-title = "Add unified read-only release summary JSON endpoint for dashboards and automation clients"
+title = "Add unified read-only release summary endpoint GET /api/tracking/releases/summary (supporting ?updates_only=true) returning the shared v1 JSON envelope (schema_version=1, domain=opensource_releases, owner=my-gitstars, host_id=fleet, summary/delta/items) with real PostgreSQL tests and docs/api.md updates"
 state = "todo"
 human_check = "pending"
 specs = []
@@ -80,7 +80,7 @@ blocker_options = []
 [[tasks]]
 id = "T-020"
 milestone = "M-OPS-01"
-title = "Pin explicit version tags on container base and service images in Dockerfile and docker-compose.yml (remove bare latest tags)"
+title = "Pin explicit version tags on container base and service images in Dockerfile and docker-compose.yml (remove bare latest tags), pass through API_BEARER_TOKEN without default in compose and .env.example, and verify docker compose --profile local-db smoke check"
 state = "todo"
 human_check = "pending"
 specs = []

@@ -67,6 +67,6 @@ DB_HOST=127.0.0.1 DB_PORT=25432 npm test
 ```
 
 - When changing `backend/migrations/`, also verify rollback and re-apply (`npm run migrate:undo && npm run migrate`).
-- Do not accept `# SKIP` in `backend` tests: skipped tests mean PostgreSQL was unreachable and repository-isolation guards did not run.
+- Do not accept `# SKIP` in `backend` tests: skipped tests mean PostgreSQL was unreachable and repository-isolation guards did not run. On a development workstation without a local Docker or PostgreSQL runtime, run syntax, unit, and frontend checks locally and run the PostgreSQL migration/test suite and `docker compose --profile local-db up --build` smoke check against a remote Docker test host or CI (`DB_HOST=...`) rather than marking DB tests unverified.
 - When changing routes, auth, build setup, or container files, run an end-to-end container smoke check (`docker compose --profile local-db up --build`) and verify `GET /api/health` returns `database: "ok"` and `frontend: "ok"` alongside real auth/route responses.
 - In `interactive` mode, skip automatic multi-subagent reviews on routine edits; run a fresh-context independent review before irreversible migrations, auth/token boundaries, or when owner sign-off is needed.
