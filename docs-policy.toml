@@ -1,0 +1,64 @@
+version = 2
+discipline_version = "2026.11.2"
+
+[project]
+name = "my-gitstars"
+identity = "product"
+language = "en"
+default_stage = "usable"
+
+[collaboration]
+mode = "interactive"
+model_tier = "frontier"
+auto_independent_review = false
+grill_cadence_commits = 12
+grill_cadence_modules = 4
+review_anchor_sha = "1f405f7"
+
+[adoption]
+# "observed" (report gaps as advisories) | "scoped_enforcement" | "adopted"
+stage = "observed"
+template_commit = "8abc2bd59bba8743b6c9271fc06808857827c13a"
+managed_paths = []
+
+[layout]
+source_roots = [
+  "backend/src",
+  "new_frontend/app",
+  "new_frontend/components",
+  "new_frontend/lib",
+]
+placeholder_names = ["README.md", ".gitkeep"]
+harness_paths = [
+  "backend/migrations",
+  "backend/scripts",
+  "backend/test",
+  "new_frontend/scripts",
+  "docs",
+  ".github",
+]
+
+[budgets]
+max_source_lines = 500
+max_style_lines = 300
+forbid_catchall_dirs = ["utils", "helpers", "common", "misc"]
+
+[commands]
+backend_check = "cd backend && npm run check"
+backend_test = "cd backend && npm test"
+frontend_typecheck = "cd new_frontend && npm run typecheck"
+frontend_lint = "cd new_frontend && npm run lint"
+frontend_test = "cd new_frontend && npm test"
+frontend_build = "cd new_frontend && npm run build"
+
+[severity]
+broken_links_and_ids = "error"
+source_ownership = "error"
+import_boundaries = "error"
+file_size_budget = "error"
+missing_role_header = "error"
+unknown_task_specs = "error"
+catchall_directories = "error"
+orphan_active_sources = "advisory"
+git_doc_lag = "advisory"
+startup_disclaimers = "error"

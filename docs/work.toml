@@ -1,0 +1,102 @@
+# Active roadmap and task queue for my-gitstars.
+# Keep task status here only; do not duplicate task tables in Markdown files.
+
+[[milestones]]
+id = "M-GOV-01"
+domain = "governance"
+name = "Adopt template-project Engineering Discipline Baseline"
+slot = "now"
+depends_on = []
+
+[[milestones]]
+id = "M-AUTO-01"
+domain = "backend-api"
+name = "Machine-Readable Release Summary API & Programmatic Version Tracking"
+slot = "next"
+depends_on = ["M-GOV-01"]
+
+[[milestones]]
+id = "M-OPS-01"
+domain = "runtime"
+name = "Reproducible Container Builds with Pinned Base Images"
+slot = "next"
+depends_on = ["M-GOV-01"]
+
+[[milestones]]
+id = "M-MOD-01"
+domain = "modularity"
+name = "Incremental Modularization of Oversized Legacy Files"
+slot = "later"
+depends_on = ["M-AUTO-01", "M-OPS-01"]
+
+[[tasks]]
+id = "T-001"
+milestone = "M-GOV-01"
+title = "Add docs-policy.toml, AGENTS.md, ARCHITECTURE.md, docs/work.toml, and docs/discipline-adoption.md at observed adoption stage"
+state = "ready_for_check"
+human_check = "pending"
+specs = []
+decisions = []
+sources = []
+blocker_question = ""
+blocker_options = []
+
+[[tasks]]
+id = "T-010"
+milestone = "M-AUTO-01"
+title = "Add optional Bearer API token authentication for automation clients (disabled by default, constant-time comparison, scoped permissions)"
+state = "todo"
+human_check = "pending"
+specs = []
+decisions = []
+sources = []
+blocker_question = ""
+blocker_options = []
+
+[[tasks]]
+id = "T-011"
+milestone = "M-AUTO-01"
+title = "Support programmatic owner/repo version tracking persisted via Sequelize migration without requiring or polluting GitHub stars"
+state = "todo"
+human_check = "pending"
+specs = []
+decisions = []
+sources = []
+blocker_question = ""
+blocker_options = []
+
+[[tasks]]
+id = "T-012"
+milestone = "M-AUTO-01"
+title = "Add unified read-only release summary JSON endpoint for dashboards and automation clients"
+state = "todo"
+human_check = "pending"
+specs = []
+decisions = []
+sources = []
+blocker_question = ""
+blocker_options = []
+
+[[tasks]]
+id = "T-020"
+milestone = "M-OPS-01"
+title = "Pin explicit version tags on container base and service images in Dockerfile and docker-compose.yml (remove bare latest tags)"
+state = "todo"
+human_check = "pending"
+specs = []
+decisions = []
+sources = []
+blocker_question = ""
+blocker_options = []
+
+[[tasks]]
+id = "T-030"
+milestone = "M-MOD-01"
+title = "Split oversized legacy files (backend/src/routes/repos.js, new_frontend/app/dashboard/page.tsx) incrementally, replace backend/test/helpers/, and evaluate scoped_enforcement"
+state = "todo"
+human_check = "pending"
+specs = []
+decisions = []
+sources = []
+blocker_question = ""
+blocker_options = []
